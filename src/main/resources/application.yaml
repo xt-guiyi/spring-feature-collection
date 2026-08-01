@@ -1,0 +1,10 @@
+server:
+  port: 3379
+
+spring:
+  application:
+    name: xiaoxingxing
+  devtools:
+    add-properties: false
+
+
