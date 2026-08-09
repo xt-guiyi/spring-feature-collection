@@ -31,6 +31,20 @@
 		<mybatis-plus.version>3.5.17</mybatis-plus.version>
 	</properties>
 	<dependencies>
+		<!--
+			RabbitMQ 可靠消息学习模块：
+			1. spring-boot-starter-amqp 提供 RabbitTemplate、@RabbitListener、Confirm 和 Return；
+			2. spring-rabbit-stream 提供 RabbitStreamTemplate 与原生 Stream 监听容器。
+			两个依赖的版本均由 Spring Boot 4.1 统一管理，避免手工指定后产生版本错配。
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-amqp</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.amqp</groupId>
+			<artifactId>spring-rabbit-stream</artifactId>
+		</dependency>
 		<!-- MongoDB 动态问卷学习模块：同步 Repository + MongoTemplate。 -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

@@ -18,7 +18,10 @@ import javax.sql.DataSource;
 
 @Configuration
 @MapperScan(
-        basePackages = "com.xt.xiaoxingxing.playground.postgresql.mapper",
+        basePackages = {
+                "com.xt.xiaoxingxing.playground.postgresql.mapper",
+                "com.xt.xiaoxingxing.playground.rabbitmq.mapper"
+        },
         sqlSessionFactoryRef = "playgroundSqlSessionFactory"
 )
 public class PlaygroundMyBatisConfig {

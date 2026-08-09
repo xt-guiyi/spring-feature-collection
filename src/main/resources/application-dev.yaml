@@ -19,6 +19,22 @@ spring:
   redis:
     host: localhost
     port: 6379
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:root}
+    password: ${RABBITMQ_PASSWORD:123456}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+        concurrency: 1
+        max-concurrency: 4
+        default-requeue-rejected: false
   datasource:
     business:
       url: jdbc:postgresql://localhost:5432/postgres
@@ -41,3 +57,20 @@ mybatis-plus:
 logging:
   level:
     web: INFO
+
+playground:
+  rabbitmq:
+    order-timeout-millis: ${RABBITMQ_ORDER_TIMEOUT_MILLIS:1800000}
+    retry-delay-millis: ${RABBITMQ_RETRY_DELAY_MILLIS:5000}
+    max-consume-retries: ${RABBITMQ_MAX_CONSUME_RETRIES:3}
+    confirm-timeout-seconds: ${RABBITMQ_CONFIRM_TIMEOUT_SECONDS:5}
+    outbox:
+      batch-size: ${RABBITMQ_OUTBOX_BATCH_SIZE:20}
+      fixed-delay-millis: ${RABBITMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
+      lock-timeout-seconds: ${RABBITMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
+      max-publish-retries: ${RABBITMQ_OUTBOX_MAX_RETRIES:10}
+    stream:
+      host: ${RABBITMQ_STREAM_HOST:localhost}
+      port: ${RABBITMQ_STREAM_PORT:5552}
+      username: ${RABBITMQ_USERNAME:root}
+      password: ${RABBITMQ_PASSWORD:123456}

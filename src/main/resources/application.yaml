@@ -19,6 +19,27 @@ spring:
   redis:
     host: localhost
     port: 6379
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:root}
+    password: ${RABBITMQ_PASSWORD:123456}
+    # correlated 表示每条消息都可以携带 CorrelationData，并异步收到自己的确认结果。
+    publisher-confirm-type: correlated
+    # returns + mandatory 组合后，无任何队列接收的消息会退回生产者，而不是静默丢失。
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        # 学习可靠消息时不使用 AUTO；业务提交成功后由代码显式 basicAck。
+        acknowledge-mode: manual
+        # 一个消费者最多同时持有 10 条未确认消息，用来观察吞吐与背压的关系。
+        prefetch: 10
+        concurrency: 1
+        max-concurrency: 4
+        # 未捕获异常默认不重新入队，防止坏消息在内存中高速死循环。
+        default-requeue-rejected: false
   datasource:
     business:
       url: jdbc:postgresql://localhost:5432/postgres
@@ -41,3 +62,21 @@ mybatis-plus:
 logging:
   level:
     web: INFO
+
+playground:
+  rabbitmq:
+    # 固定 30 分钟延迟使用 TTL + DLX，不依赖 delayed-message 插件。
+    order-timeout-millis: ${RABBITMQ_ORDER_TIMEOUT_MILLIS:1800000}
+    retry-delay-millis: ${RABBITMQ_RETRY_DELAY_MILLIS:5000}
+    max-consume-retries: ${RABBITMQ_MAX_CONSUME_RETRIES:3}
+    confirm-timeout-seconds: ${RABBITMQ_CONFIRM_TIMEOUT_SECONDS:5}
+    outbox:
+      batch-size: ${RABBITMQ_OUTBOX_BATCH_SIZE:20}
+      fixed-delay-millis: ${RABBITMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
+      lock-timeout-seconds: ${RABBITMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
+      max-publish-retries: ${RABBITMQ_OUTBOX_MAX_RETRIES:10}
+    stream:
+      host: ${RABBITMQ_STREAM_HOST:localhost}
+      port: ${RABBITMQ_STREAM_PORT:5552}
+      username: ${RABBITMQ_USERNAME:root}
+      password: ${RABBITMQ_PASSWORD:123456}

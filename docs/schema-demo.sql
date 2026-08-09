@@ -1,4 +1,8 @@
 -- 1. 删除旧表（带 CASCADE 可以自动处理外键依赖）
+DROP TABLE IF EXISTS mq_notification_log CASCADE;
+DROP TABLE IF EXISTS mq_order_statistics CASCADE;
+DROP TABLE IF EXISTS mq_consumed_message CASCADE;
+DROP TABLE IF EXISTS mq_outbox_event CASCADE;
 DROP TABLE IF EXISTS order_products CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
 DROP TABLE IF EXISTS id_cards CASCADE;
@@ -76,6 +80,72 @@ CREATE TABLE order_products (
     unit_price DECIMAL(10, 2) NOT NULL,
     CONSTRAINT uk_order_product UNIQUE (order_id, product_id)
 );
+
+-- RabbitMQ Transactional Outbox：订单和待发送事件处于同一个 PostgreSQL 本地事务。
+CREATE TABLE mq_outbox_event (
+    id VARCHAR(36) PRIMARY KEY,
+    aggregate_type VARCHAR(50) NOT NULL,
+    aggregate_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    schema_version INT NOT NULL,
+    exchange_name VARCHAR(200) NOT NULL,
+    routing_key VARCHAR(200) NOT NULL,
+    payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    retry_count INT NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    locked_at TIMESTAMP,
+    last_error VARCHAR(1000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMP,
+    CONSTRAINT ck_mq_outbox_status CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'PUBLISHED', 'DEAD')),
+    CONSTRAINT ck_mq_outbox_retry_count CHECK (retry_count >= 0)
+);
+
+CREATE INDEX idx_mq_outbox_publishable
+    ON mq_outbox_event (status, next_retry_at, created_at);
+CREATE INDEX idx_mq_outbox_aggregate
+    ON mq_outbox_event (aggregate_type, aggregate_id, created_at);
+
+-- 每个消费者用 (consumer_name, message_id) 唯一键抵挡 RabbitMQ 至少一次投递产生的重复消息。
+CREATE TABLE mq_consumed_message (
+    id BIGSERIAL PRIMARY KEY,
+    consumer_name VARCHAR(100) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    aggregate_id VARCHAR(100),
+    consumed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_mq_consumer_message UNIQUE (consumer_name, message_id)
+);
+
+CREATE INDEX idx_mq_consumed_time
+    ON mq_consumed_message (consumed_at DESC, id DESC);
+
+CREATE TABLE mq_order_statistics (
+    id SMALLINT PRIMARY KEY,
+    created_count BIGINT NOT NULL DEFAULT 0,
+    paid_count BIGINT NOT NULL DEFAULT 0,
+    cancelled_count BIGINT NOT NULL DEFAULT 0,
+    created_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
+    last_event_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_mq_order_statistics_singleton CHECK (id = 1)
+);
+
+CREATE TABLE mq_notification_log (
+    id BIGSERIAL PRIMARY KEY,
+    message_id VARCHAR(36) NOT NULL,
+    order_id BIGINT,
+    event_type VARCHAR(100) NOT NULL,
+    channel VARCHAR(30) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    content VARCHAR(500) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uk_mq_notification_message_channel UNIQUE (message_id, channel)
+);
+
+CREATE INDEX idx_mq_notification_order
+    ON mq_notification_log (order_id, created_at DESC);
 
 -- 3. 插入示例数据
 

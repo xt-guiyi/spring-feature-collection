@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.rabbitmq.mapper.MqConsumerRecordMapper">
+
+    <!-- 并发重复消息最终由数据库唯一键裁决；影响 0 行表示该消费者已经处理过。 -->
+    <insert id="insertConsumedIfAbsent"
+            parameterType="com.xt.xiaoxingxing.playground.rabbitmq.entity.MqConsumedMessage">
+        INSERT INTO mq_consumed_message (
+            consumer_name, message_id, event_type, aggregate_id, consumed_at
+        ) VALUES (
+            #{consumerName}, #{messageId}, #{eventType}, #{aggregateId},
+            COALESCE(#{consumedAt}, CURRENT_TIMESTAMP)
+        )
+        ON CONFLICT (consumer_name, message_id) DO NOTHING
+    </insert>
+
+    <!--
+        固定主键 1 的 UPSERT 原子累加统计。每个事件先写幂等记录，只有插入成功才执行本 SQL，
+        因此 RabbitMQ 重复投递不会重复增加计数。
+    -->
+    <insert id="upsertStatistics">
+        INSERT INTO mq_order_statistics (
+            id, created_count, paid_count, cancelled_count,
+            created_amount, last_event_at, updated_at
+        ) VALUES (
+            1,
+            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_PAID' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_CANCELLED' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN COALESCE(#{totalAmount}, 0) ELSE 0 END,
+            #{occurredAt},
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            created_count = mq_order_statistics.created_count + EXCLUDED.created_count,
+            paid_count = mq_order_statistics.paid_count + EXCLUDED.paid_count,
+            cancelled_count = mq_order_statistics.cancelled_count + EXCLUDED.cancelled_count,
+            created_amount = mq_order_statistics.created_amount + EXCLUDED.created_amount,
+            last_event_at = CASE
+                WHEN mq_order_statistics.last_event_at IS NULL THEN EXCLUDED.last_event_at
+                ELSE GREATEST(mq_order_statistics.last_event_at, EXCLUDED.last_event_at)
+            END,
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <insert id="insertNotification"
+            parameterType="com.xt.xiaoxingxing.playground.rabbitmq.entity.MqNotificationLog">
+        INSERT INTO mq_notification_log (
+            message_id, order_id, event_type, channel, status, content, created_at
+        ) VALUES (
+            #{messageId}, #{orderId}, #{eventType}, #{channel}, #{status}, #{content},
+            COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
+        )
+        ON CONFLICT (message_id, channel) DO NOTHING
+    </insert>
+
+    <select id="selectConsumedPage"
+            resultType="com.xt.xiaoxingxing.playground.rabbitmq.entity.MqConsumedMessage">
+        SELECT id,
+               consumer_name AS consumerName,
+               message_id AS messageId,
+               event_type AS eventType,
+               aggregate_id AS aggregateId,
+               consumed_at AS consumedAt
+        FROM mq_consumed_message
+        <where>
+            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
+        </where>
+        ORDER BY consumed_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countConsumed" resultType="long">
+        SELECT COUNT(*)
+        FROM mq_consumed_message
+        <where>
+            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
+        </where>
+    </select>
+
+    <select id="selectStatistics"
+            resultType="com.xt.xiaoxingxing.playground.rabbitmq.entity.MqOrderStatistics">
+        SELECT id,
+               created_count AS createdCount,
+               paid_count AS paidCount,
+               cancelled_count AS cancelledCount,
+               created_amount AS createdAmount,
+               last_event_at AS lastEventAt,
+               updated_at AS updatedAt
+        FROM mq_order_statistics
+        WHERE id = 1
+    </select>
+
+    <select id="selectNotificationPage"
+            resultType="com.xt.xiaoxingxing.playground.rabbitmq.entity.MqNotificationLog">
+        SELECT id,
+               message_id AS messageId,
+               order_id AS orderId,
+               event_type AS eventType,
+               channel,
+               status,
+               content,
+               created_at AS createdAt
+        FROM mq_notification_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countNotifications" resultType="long">
+        SELECT COUNT(*) FROM mq_notification_log
+    </select>
+
+</mapper>
