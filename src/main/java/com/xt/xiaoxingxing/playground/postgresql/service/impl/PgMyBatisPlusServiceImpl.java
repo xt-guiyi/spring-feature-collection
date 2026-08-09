@@ -1081,7 +1081,7 @@ public class PgMyBatisPlusServiceImpl implements PgMyBatisPlusService {
      */
     @Override
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
-    public CompleteOrderResponse createCompleteOrder(CompleteOrderCreateRequest request) g{
+    public CompleteOrderResponse createCompleteOrder(CompleteOrderCreateRequest request) {
         /*
          * 实现步骤：
          * 1. 校验请求结构并确认下单用户存在；

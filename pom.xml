@@ -71,7 +71,11 @@
 		<dependency>
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
+			<!--
+				JSONB TypeHandler 在主代码中直接使用 PostgreSQL JDBC 的 PGobject，
+				因此驱动必须进入编译 classpath，不能再声明为 runtime-only。
+				默认 compile 作用域同时覆盖编译和运行，不影响应用连接 PostgreSQL。
+			-->
 		</dependency>
 
 		<dependency>
