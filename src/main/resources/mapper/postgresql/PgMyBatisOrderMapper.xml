@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.postgresql.mapper.PgMyBatisOrderMapper">
+
+    <!-- 公共列片段消除重复，并显式把 snake_case 字段映射为 Java 驼峰属性。 -->
+    <sql id="orderColumns">
+        id, user_id AS userId, order_no AS orderNo, total_amount AS totalAmount,
+        status, created_at AS createdAt
+    </sql>
+
+    <!-- RETURNING 直接返回 BIGSERIAL 生成的订单主键。 -->
+    <select id="insertOrder"
+            parameterType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder"
+            resultType="java.lang.Long"
+            affectData="true"
+            flushCache="true">
+        INSERT INTO orders (user_id, order_no, total_amount, status, created_at)
+        VALUES (
+            #{userId},
+            #{orderNo},
+            #{totalAmount},
+            #{status},
+            COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
+        )
+        RETURNING id
+    </select>
+
+    <select id="selectOrderById" resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT <include refid="orderColumns"/>
+        FROM orders
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAllOrders" resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT <include refid="orderColumns"/>
+        FROM orders
+        ORDER BY id ASC
+    </select>
+
+    <!-- set + if 实现选择性更新：请求未提供的字段不会被写成 NULL。 -->
+    <update id="updateOrder" parameterType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        UPDATE orders
+        <set>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="orderNo != null">order_no = #{orderNo},</if>
+            <if test="totalAmount != null">total_amount = #{totalAmount},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="createdAt != null">created_at = #{createdAt},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteOrderById">
+        DELETE FROM orders WHERE id = #{id}
+    </delete>
+
+    <!--
+        动态 SQL 同时演示等值条件、金额范围和多字段排序。
+        金额上下界独立判断，因此请求只传一侧时也能正常查询。
+    -->
+    <select id="selectOrdersByCondition"
+            parameterType="com.xt.xiaoxingxing.playground.postgresql.dto.request.OrderQueryRequest"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT <include refid="orderColumns"/>
+        FROM orders
+        <where>
+            <if test="userId != null">AND user_id = #{userId}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="minAmount != null">AND total_amount &gt;= #{minAmount}</if>
+            <if test="maxAmount != null">AND total_amount &lt;= #{maxAmount}</if>
+        </where>
+        ORDER BY total_amount DESC NULLS LAST, id ASC
+    </select>
+
+    <select id="countOrders" resultType="long">
+        SELECT COUNT(*) FROM orders
+    </select>
+
+    <!-- 使用 created_at、id 两级倒序，避免相同创建时间导致翻页顺序不稳定。 -->
+    <select id="selectOrderPage" resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT <include refid="orderColumns"/>
+        FROM orders
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <!--
+        set 固定设置新状态，where 根据请求动态缩小更新范围。
+        Service 强制至少提供一个筛选条件，避免误更新整张订单表。
+    -->
+    <update id="updateOrderStatusByCondition"
+            parameterType="com.xt.xiaoxingxing.playground.postgresql.dto.request.OrderStatusUpdateRequest">
+        UPDATE orders
+        SET status = #{newStatus}
+        <where>
+            <if test="oldStatus != null and oldStatus != ''">AND status = #{oldStatus}</if>
+            <if test="userId != null">AND user_id = #{userId}</if>
+            <if test="minAmount != null">AND total_amount &gt;= #{minAmount}</if>
+        </where>
+    </update>
+
+</mapper>

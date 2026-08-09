@@ -306,7 +306,7 @@ public class RedisUtil {
      * @param offset 偏移位置
      * @return true 表示 1，false 表示 0
      */
-    public Boolean getBit(String key, long offset) {
+    public Boolean getBit(String key, long offset)  {
         return stringRedisTemplate.opsForValue().getBit(key, offset);
     }
 

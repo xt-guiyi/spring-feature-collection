@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.postgresql.mapper.PgMyBatisQueryMapper">
+
+    <!--
+        INNER JOIN：从订单出发，依次连接用户、订单明细和商品。
+        INNER JOIN 只保留四张表都能匹配的行，任何逻辑外键失效都会让该行消失。 也就是取交集
+    -->
+    <select id="selectInnerOrderDetails"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.OrderDetailVO">
+        SELECT
+            o.id AS order_id,
+            o.order_no,
+            u.username,
+            p.name AS product_name,
+            op.quantity,
+            op.unit_price,
+            op.quantity * op.unit_price AS subtotal
+        FROM orders o
+        INNER JOIN users u ON u.id = o.user_id
+        INNER JOIN order_products op ON op.order_id = o.id
+        INNER JOIN products p ON p.id = op.product_id
+        WHERE o.order_no = #{orderNo}
+        ORDER BY op.id ASC
+    </select>
+
+    <!--
+        LEFT JOIN：users 是左侧保留表，所以（条件不满足 ic.user_id = u.id的）没有身份证的用户仍会返回，
+        此时 card_number 和 real_name 为 NULL。
+    -->
+    <select id="selectLeftUsersWithIdCard"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserWithIdCardVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            u.email,
+            ic.card_number,
+            ic.real_name
+        FROM users u
+        LEFT JOIN id_cards ic ON ic.user_id = u.id
+        ORDER BY u.id ASC
+    </select>
+
+    <!--
+        RIGHT JOIN：右侧 users 被完整保留，没有订单的用户也会得到一行空订单数据。
+        把表顺序交换成 users LEFT JOIN orders 可得到等价结果，实际业务通常更常用后者。
+    -->
+    <select id="selectRightUsersWithOrders"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserOrderVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            o.order_no,
+            o.total_amount,
+            o.status,
+            o.created_at AS order_time
+        FROM orders o
+        RIGHT JOIN users u ON u.id = o.user_id
+        ORDER BY u.id ASC, o.created_at DESC NULLS LAST, o.id DESC NULLS LAST
+    </select>
+
+    <!--
+        FULL OUTER JOIN：同时保留 products 和 order_products 两边的全部记录。
+        当前表只使用逻辑外键，FULL JOIN 特别适合发现引用不存在商品的脏明细。
+    -->
+    <select id="selectFullProductOrderAudit"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.ProductOrderAuditVO">
+        SELECT
+            COALESCE(p.id, op.product_id) AS product_id,
+            p.name AS product_name,
+            op.id AS order_product_id,
+            op.order_id,
+            op.quantity,
+            CASE
+                WHEN p.id IS NULL THEN 'ORPHAN_ORDER_PRODUCT'
+                WHEN op.id IS NULL THEN 'UNSOLD_PRODUCT'
+                ELSE 'MATCHED'
+            END AS match_status
+        FROM products p
+        FULL OUTER JOIN order_products op ON op.product_id = p.id
+        ORDER BY COALESCE(p.id, op.product_id) ASC, op.id ASC NULLS LAST
+    </select>
+
+    <!--
+        CROSS JOIN：每个用户与每个商品都会组合，结果行数等于两表行数乘积。
+        LIMIT 是学习案例的保护阀，避免数据增长后一次返回过多候选组合。
+    -->
+    <select id="selectCrossUserProductCandidates"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserProductCandidateVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            p.id AS product_id,
+            p.name AS product_name,
+            p.price AS product_price
+        FROM users u
+        CROSS JOIN products p
+        ORDER BY u.id ASC, p.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+        LATERAL JOIN：右侧子查询可以引用当前左侧用户 u.id。
+        每个用户分别按时间倒序取一条订单；ON TRUE 表示连接条件已在子查询内部完成。
+    -->
+    <select id="selectLatestOrderPerUser"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserOrderVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            latest.order_no,
+            latest.total_amount,
+            latest.status,
+            latest.created_at AS order_time
+        FROM users u
+        LEFT JOIN LATERAL (
+            SELECT o.order_no, o.total_amount, o.status, o.created_at, o.id
+            FROM orders o
+            WHERE o.user_id = u.id
+            ORDER BY o.created_at DESC NULLS LAST, o.id DESC
+            LIMIT 1
+        ) latest ON TRUE
+        ORDER BY u.id ASC
+    </select>
+
+    <!-- LEFT JOIN 配合 GROUP BY，使无订单用户也得到 order_count=0、total_spent=0。 -->
+    <select id="selectUserOrderStats"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserOrderStatVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_amount), 0) AS total_spent
+        FROM users u
+        LEFT JOIN orders o ON o.user_id = u.id
+        GROUP BY u.id, u.username
+        ORDER BY total_spent DESC, u.id ASC
+    </select>
+
+    <!--
+        派生表先按用户聚合订单，再与用户表连接取得用户名。
+        这种“先聚合后连接”可以避免连接其他明细表导致订单金额被重复累计。
+    -->
+    <select id="selectTopSpendingUsers"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserOrderStatVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            stats.order_count,
+            stats.total_spent
+        FROM users u
+        INNER JOIN (
+            SELECT user_id, COUNT(*) AS order_count, COALESCE(SUM(total_amount), 0) AS total_spent
+            FROM orders
+            GROUP BY user_id
+        ) stats ON stats.user_id = u.id
+        ORDER BY stats.total_spent DESC, u.id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- EXISTS 只关心是否至少存在一行，数据库可以在首次匹配后停止继续扫描。 -->
+    <select id="selectUsersWithOrders"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserSimpleVO">
+        SELECT u.id AS user_id, u.username, u.email
+        FROM users u
+        WHERE EXISTS (
+            SELECT 1 FROM orders o WHERE o.user_id = u.id
+        )
+        ORDER BY u.id ASC
+    </select>
+
+    <!-- NOT EXISTS 是反连接写法，返回在订单表中完全找不到匹配项的用户。 -->
+    <select id="selectUsersWithoutOrders"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserSimpleVO">
+        SELECT u.id AS user_id, u.username, u.email
+        FROM users u
+        WHERE NOT EXISTS (
+            SELECT 1 FROM orders o WHERE o.user_id = u.id
+        )
+        ORDER BY u.id ASC
+    </select>
+
+    <!--
+        HAVING 在 GROUP BY 聚合完成后过滤组，与 WHERE 过滤原始行的阶段不同。
+        使用 LEFT JOIN 是为了让 minOrderCount=0 时零订单用户也能进入分组；COUNT(o.id)
+        不会统计补出的 NULL 行，因此零订单用户的计数仍准确为 0。
+    -->
+    <select id="selectUsersByOrderCount"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserOrderStatVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            COUNT(o.id) AS order_count,
+            COALESCE(SUM(o.total_amount), 0) AS total_spent
+        FROM users u
+        LEFT JOIN orders o ON o.user_id = u.id
+        GROUP BY u.id, u.username
+        HAVING COUNT(o.id) &gt;= #{minOrderCount}
+        ORDER BY order_count DESC, u.id ASC
+    </select>
+
+    <!--
+        UNION ALL 不去重，直接拼接两个结果集；这里用互斥状态条件保证每个用户只出现一次。
+        与 UNION 相比，它省去了排序或哈希去重步骤。
+    -->
+    <select id="selectUsersUnionAll"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserSimpleVO">
+        SELECT id AS user_id, username, email, status
+        FROM users
+        WHERE status = 'ACTIVE'
+        UNION ALL
+        SELECT id AS user_id, username, email, status
+        FROM users
+        WHERE status &lt;&gt; 'ACTIVE' OR status IS NULL
+        ORDER BY user_id ASC
+    </select>
+
+    <!-- CASE 把数据库状态码映射为适合展示的中文名称。 -->
+    <select id="selectOrderStatusWithName"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.OrderStatusVO">
+        SELECT
+            id AS order_id,
+            order_no,
+            status,
+            CASE status
+                WHEN 'PAID' THEN '已支付'
+                WHEN 'PENDING' THEN '待支付'
+                WHEN 'CANCELLED' THEN '已取消'
+                ELSE '未知'
+            END AS status_name
+        FROM orders
+        ORDER BY id ASC
+    </select>
+
+    <!--
+        枚举自动映射案例：SQL 只读取数据库原始 status code，不使用 CASE WHEN 生成中文名称。
+        resultType 的 status 属性是 OrderStatusEnum，MyBatis-Plus 提供的枚举类型处理器会读取
+        枚举中 @EnumValue 标记的 code，将字符串 PAID/PENDING/CANCELLED 转换为对应枚举常量。
+        中文 statusName 随后由 Service 从枚举 text 取得，避免在 SQL 和 Java 中重复维护映射表。
+    -->
+    <select id="selectOrderStatusWithEnumMapping"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrderStatusEnumDemo">
+        SELECT
+            id,
+            order_no,
+            status
+        FROM orders
+        ORDER BY id ASC
+    </select>
+
+    <!-- COALESCE 从左到右选择第一个非 NULL 值。 -->
+    <select id="selectUsersWithCoalescePhone"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserContactVO">
+        SELECT
+            id AS user_id,
+            username,
+            email,
+            COALESCE(phone, '未填写') AS phone
+        FROM users
+        ORDER BY id ASC
+    </select>
+
+    <!-- PostgreSQL 强制转换 ::date 和 EXTRACT 展示时间字段的日期、年份提取。 -->
+    <select id="selectUserDateStats"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserDateStatVO">
+        SELECT
+            id AS user_id,
+            username,
+            created_at,
+            created_at::date AS create_date,
+            EXTRACT(YEAR FROM created_at)::int AS create_year
+        FROM users
+        ORDER BY id ASC
+    </select>
+
+    <!--
+        ROW_NUMBER 是窗口函数：不会像 GROUP BY 一样压缩结果行，而是在排序结果上生成连续名次。
+        相同消费金额也会得到不同序号，并以用户 ID 作为稳定的第二排序键。
+    -->
+    <select id="selectUserSpendingRank"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserRankVO">
+        SELECT
+            u.id AS user_id,
+            u.username,
+            stats.total_spent,
+            ROW_NUMBER() OVER (ORDER BY stats.total_spent DESC, u.id ASC) AS rank
+        FROM users u
+        INNER JOIN (
+            SELECT user_id, COALESCE(SUM(total_amount), 0) AS total_spent
+            FROM orders
+            GROUP BY user_id
+        ) stats ON stats.user_id = u.id
+        ORDER BY rank ASC
+    </select>
+
+    <!--
+        CTE 把复杂查询拆成可命名的阶段：user_stats 负责统计，最终 SELECT 负责分级。
+        LEFT JOIN 让无订单用户也参与分级，其消费金额为 0。
+    -->
+    <select id="selectUserSpendingLevels"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.UserSpendingLevelVO">
+        WITH user_stats AS (
+            SELECT
+                u.id AS user_id,
+                u.username,
+                COUNT(o.id) AS order_count,
+                COALESCE(SUM(o.total_amount), 0) AS total_spent
+            FROM users u
+            LEFT JOIN orders o ON o.user_id = u.id
+            GROUP BY u.id, u.username
+        )
+        SELECT
+            user_id,
+            username,
+            order_count,
+            total_spent,
+            CASE
+                WHEN total_spent &gt;= 20000 THEN 'HIGH'
+                WHEN total_spent &gt;= 10000 THEN 'MEDIUM'
+                ELSE 'LOW'
+            END AS spending_level
+        FROM user_stats
+        ORDER BY total_spent DESC, user_id ASC
+    </select>
+
+    <!--
+        商品销量统计以 products 为保留表，未售商品的 SUM 结果通过 COALESCE 转为 0。
+        销售额使用订单明细中的成交单价，而不是当前商品价格。
+    -->
+    <select id="selectProductSalesStats"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.vo.ProductSalesStatVO">
+        SELECT
+            p.id AS product_id,
+            p.name AS product_name,
+            COALESCE(SUM(op.quantity), 0) AS total_quantity,
+            COALESCE(SUM(op.quantity * op.unit_price), 0) AS total_sales,
+            p.stock
+        FROM products p
+        LEFT JOIN order_products op ON op.product_id = p.id
+        GROUP BY p.id, p.name, p.stock
+        ORDER BY total_sales DESC, p.id ASC
+    </select>
+
+</mapper>

@@ -4,7 +4,40 @@ server:
 spring:
   application:
     name: xiaoxingxing
-  devtools:
-    add-properties: false
+  mongodb:
+    # Spring Boot 4 使用 spring.mongodb.uri 配置连接。
+    # 可以通过 MONGODB_URI 覆盖本地学习环境的默认账号和地址。
+    uri: ${MONGODB_URI:mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin}
+  data:
+    mongodb:
+      # 学习案例通过 @Indexed / @CompoundIndex 声明索引，启动时自动创建。
+      # 生产环境通常应改成受版本控制的显式索引迁移。
+      auto-index-creation: true
+      representation:
+        # NUMBER 题允许使用 BigDecimal，MongoDB 中按 Decimal128 保存，避免退化成字符串。
+        big-decimal: decimal128
+  redis:
+    host: localhost
+    port: 6379
+  datasource:
+    business:
+      url: jdbc:postgresql://localhost:5432/postgres
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
+    playground:
+      url: jdbc:postgresql://localhost:5432/demo
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
 
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
 
+logging:
+  level:
+    web: INFO
