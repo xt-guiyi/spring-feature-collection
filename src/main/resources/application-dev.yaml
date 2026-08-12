@@ -19,22 +19,6 @@ spring:
   redis:
     host: localhost
     port: 6379
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:root}
-    password: ${RABBITMQ_PASSWORD:123456}
-    publisher-confirm-type: correlated
-    publisher-returns: true
-    template:
-      mandatory: true
-    listener:
-      simple:
-        acknowledge-mode: manual
-        prefetch: 10
-        concurrency: 1
-        max-concurrency: 4
-        default-requeue-rejected: false
   datasource:
     business:
       url: jdbc:postgresql://localhost:5432/postgres
@@ -49,7 +33,9 @@ spring:
 
 mybatis-plus:
   configuration:
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 交给 SLF4J/Logback 管理 SQL 日志，避免 StdOutImpl 绕过日志级别持续刷屏。
+    # 需要排查 SQL 时，可按 Mapper 包名临时将 logging.level 调整为 DEBUG。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       id-type: auto
@@ -58,19 +44,24 @@ logging:
   level:
     web: INFO
 
+# RocketMQ 5.x gRPC 客户端连接 Proxy，而不是直接连接 NameServer。
+# 本地 Compose 把 Proxy 的容器端口 8081 映射到宿主机 18081。
+rocketmq:
+  producer:
+    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    topic: pg_learning_normal,pg_learning_fifo,pg_learning_delay,pg_learning_transaction
+    request-timeout: ${ROCKETMQ_REQUEST_TIMEOUT_SECONDS:5}
+    max-attempts: ${ROCKETMQ_SEND_MAX_ATTEMPTS:3}
+    ssl-enabled: false
+
 playground:
-  rabbitmq:
-    order-timeout-millis: ${RABBITMQ_ORDER_TIMEOUT_MILLIS:1800000}
-    retry-delay-millis: ${RABBITMQ_RETRY_DELAY_MILLIS:5000}
-    max-consume-retries: ${RABBITMQ_MAX_CONSUME_RETRIES:3}
-    confirm-timeout-seconds: ${RABBITMQ_CONFIRM_TIMEOUT_SECONDS:5}
+  rocketmq:
+    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    order-timeout-millis: ${ROCKETMQ_ORDER_TIMEOUT_MILLIS:1800000}
+    transaction-prepared-timeout-seconds: ${ROCKETMQ_TRANSACTION_PREPARED_TIMEOUT_SECONDS:120}
+    transaction-cleanup-batch-size: ${ROCKETMQ_TRANSACTION_CLEANUP_BATCH_SIZE:50}
     outbox:
-      batch-size: ${RABBITMQ_OUTBOX_BATCH_SIZE:20}
-      fixed-delay-millis: ${RABBITMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
-      lock-timeout-seconds: ${RABBITMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
-      max-publish-retries: ${RABBITMQ_OUTBOX_MAX_RETRIES:10}
-    stream:
-      host: ${RABBITMQ_STREAM_HOST:localhost}
-      port: ${RABBITMQ_STREAM_PORT:5552}
-      username: ${RABBITMQ_USERNAME:root}
-      password: ${RABBITMQ_PASSWORD:123456}
+      batch-size: ${ROCKETMQ_OUTBOX_BATCH_SIZE:20}
+      fixed-delay-millis: ${ROCKETMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
+      lock-timeout-seconds: ${ROCKETMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
+      max-publish-retries: ${ROCKETMQ_OUTBOX_MAX_RETRIES:10}

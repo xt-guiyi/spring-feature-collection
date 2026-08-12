@@ -19,27 +19,6 @@ spring:
   redis:
     host: localhost
     port: 6379
-  rabbitmq:
-    host: ${RABBITMQ_HOST:localhost}
-    port: ${RABBITMQ_PORT:5672}
-    username: ${RABBITMQ_USERNAME:root}
-    password: ${RABBITMQ_PASSWORD:123456}
-    # correlated 表示每条消息都可以携带 CorrelationData，并异步收到自己的确认结果。
-    publisher-confirm-type: correlated
-    # returns + mandatory 组合后，无任何队列接收的消息会退回生产者，而不是静默丢失。
-    publisher-returns: true
-    template:
-      mandatory: true
-    listener:
-      simple:
-        # 学习可靠消息时不使用 AUTO；业务提交成功后由代码显式 basicAck。
-        acknowledge-mode: manual
-        # 一个消费者最多同时持有 10 条未确认消息，用来观察吞吐与背压的关系。
-        prefetch: 10
-        concurrency: 1
-        max-concurrency: 4
-        # 未捕获异常默认不重新入队，防止坏消息在内存中高速死循环。
-        default-requeue-rejected: false
   datasource:
     business:
       url: jdbc:postgresql://localhost:5432/postgres
@@ -54,7 +33,9 @@ spring:
 
 mybatis-plus:
   configuration:
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 交给 SLF4J/Logback 管理 SQL 日志，避免 StdOutImpl 绕过日志级别持续刷屏。
+    # 需要排查 SQL 时，可按 Mapper 包名临时将 logging.level 调整为 DEBUG。
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
   global-config:
     db-config:
       id-type: auto
@@ -63,20 +44,30 @@ logging:
   level:
     web: INFO
 
+# RocketMQ 5.x SDK 的 endpoints 指向 Proxy 的 gRPC 端口。
+# NameServer 负责路由发现，Broker 负责保存消息，Proxy 才是 5.x gRPC 客户端的接入层；
+# 三者职责不同，不能把 localhost:9876（NameServer）填到这里。
+rocketmq:
+  producer:
+    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    # Starter 会为这些 Topic 构造生产者；Topic 的类型仍需由 docker-compose 中的初始化任务创建。
+    topic: pg_learning_normal,pg_learning_fifo,pg_learning_delay,pg_learning_transaction
+    request-timeout: ${ROCKETMQ_REQUEST_TIMEOUT_SECONDS:5}
+    max-attempts: ${ROCKETMQ_SEND_MAX_ATTEMPTS:3}
+    ssl-enabled: false
+
 playground:
-  rabbitmq:
-    # 固定 30 分钟延迟使用 TTL + DLX，不依赖 delayed-message 插件。
-    order-timeout-millis: ${RABBITMQ_ORDER_TIMEOUT_MILLIS:1800000}
-    retry-delay-millis: ${RABBITMQ_RETRY_DELAY_MILLIS:5000}
-    max-consume-retries: ${RABBITMQ_MAX_CONSUME_RETRIES:3}
-    confirm-timeout-seconds: ${RABBITMQ_CONFIRM_TIMEOUT_SECONDS:5}
+  rocketmq:
+    # 消费者注解不能读取 producer 配置对象，因此学习模块保留一份统一 endpoints 配置。
+    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    # 默认 30 分钟后投递“检查订单是否仍未支付”的延迟消息，而不是盲目取消订单。
+    order-timeout-millis: ${ROCKETMQ_ORDER_TIMEOUT_MILLIS:1800000}
+    # PREPARED 太久仍未形成订单事实时，事务回查可安全判定回滚，避免半消息永久悬挂。
+    transaction-prepared-timeout-seconds: ${ROCKETMQ_TRANSACTION_PREPARED_TIMEOUT_SECONDS:120}
+    # 进程可能在写 PREPARED 后、发半消息前崩溃；主动收口每轮只处理有界批量。
+    transaction-cleanup-batch-size: ${ROCKETMQ_TRANSACTION_CLEANUP_BATCH_SIZE:50}
     outbox:
-      batch-size: ${RABBITMQ_OUTBOX_BATCH_SIZE:20}
-      fixed-delay-millis: ${RABBITMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
-      lock-timeout-seconds: ${RABBITMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
-      max-publish-retries: ${RABBITMQ_OUTBOX_MAX_RETRIES:10}
-    stream:
-      host: ${RABBITMQ_STREAM_HOST:localhost}
-      port: ${RABBITMQ_STREAM_PORT:5552}
-      username: ${RABBITMQ_USERNAME:root}
-      password: ${RABBITMQ_PASSWORD:123456}
+      batch-size: ${ROCKETMQ_OUTBOX_BATCH_SIZE:20}
+      fixed-delay-millis: ${ROCKETMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
+      lock-timeout-seconds: ${ROCKETMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
+      max-publish-retries: ${ROCKETMQ_OUTBOX_MAX_RETRIES:10}

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.rocketmq.mapper.MqOrderBusinessMapper">
+
+    <select id="selectOrderById" resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT id,
+               user_id AS userId,
+               order_no AS orderNo,
+               total_amount AS totalAmount,
+               status,
+               created_at AS createdAt
+        FROM orders
+        WHERE id = #{orderId}
+    </select>
+
+    <!--
+        状态判断与更新必须位于同一条 SQL。支付与延迟取消并发时，至多一方影响 1 行；
+        返回 0 不必然是异常，表示订单已经被另一方推进到 PAID/CANCELLED 或订单不存在。
+    -->
+    <update id="markPaid">
+        UPDATE orders
+        SET status = 'PAID'
+        WHERE id = #{orderId}
+          AND status = 'PENDING'
+    </update>
+
+    <update id="markCancelled">
+        UPDATE orders
+        SET status = 'CANCELLED'
+        WHERE id = #{orderId}
+          AND status = 'PENDING'
+    </update>
+
+    <!-- 固定 product_id 升序恢复库存，降低多个订单事务反向获取产品行锁造成死锁的概率。 -->
+    <select id="selectOrderProducts"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrderProduct">
+        SELECT id,
+               order_id AS orderId,
+               product_id AS productId,
+               quantity,
+               unit_price AS unitPrice
+        FROM order_products
+        WHERE order_id = #{orderId}
+        ORDER BY product_id ASC
+    </select>
+
+    <!-- 只有赢得 CANCELLED 条件更新的一方才可调用；该语句影响 1 行表示成功恢复一个产品行的库存。 -->
+    <update id="restoreStock">
+        UPDATE products
+        SET stock = stock + #{quantity}
+        WHERE id = #{productId}
+    </update>
+
+</mapper>

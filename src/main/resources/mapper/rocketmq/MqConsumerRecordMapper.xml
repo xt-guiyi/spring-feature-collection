@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.rocketmq.mapper.MqConsumerRecordMapper">
+
+    <!--
+        RocketMQ 至少一次投递下，同一消息可能并发重试。唯一约束是最终裁决：影响 1 行的调用者获得业务处理权，
+        影响 0 行表示已经成功处理过，应直接按幂等成功返回，不能再次累计或发送通知。
+    -->
+    <insert id="insertConsumedIfAbsent"
+            parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage">
+        INSERT INTO mq_consumed_message (
+            consumer_name, message_id, event_type, aggregate_id, consumed_at
+        ) VALUES (
+            #{consumerName}, #{messageId}, #{eventType}, #{aggregateId},
+            COALESCE(#{consumedAt}, CURRENT_TIMESTAMP)
+        )
+        ON CONFLICT (consumer_name, message_id) DO NOTHING
+    </insert>
+
+    <!--
+        固定主键 1 的 UPSERT 将本次事件增量与已有统计在一条 SQL 中原子合并。
+        它不替代幂等记录：只有 insertConsumedIfAbsent 返回 1 后才可执行本 SQL，
+        否则重复消息仍会使计数增加。
+    -->
+    <insert id="upsertStatistics">
+        INSERT INTO mq_order_statistics (
+            id, created_count, paid_count, cancelled_count,
+            created_amount, last_event_at, updated_at
+        ) VALUES (
+            1,
+            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_PAID' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_CANCELLED' THEN 1 ELSE 0 END,
+            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN COALESCE(#{totalAmount}, 0) ELSE 0 END,
+            #{occurredAt},
+            CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            created_count = mq_order_statistics.created_count + EXCLUDED.created_count,
+            paid_count = mq_order_statistics.paid_count + EXCLUDED.paid_count,
+            cancelled_count = mq_order_statistics.cancelled_count + EXCLUDED.cancelled_count,
+            created_amount = mq_order_statistics.created_amount + EXCLUDED.created_amount,
+            last_event_at = CASE
+                WHEN mq_order_statistics.last_event_at IS NULL THEN EXCLUDED.last_event_at
+                ELSE GREATEST(mq_order_statistics.last_event_at, EXCLUDED.last_event_at)
+            END,
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <!--
+        相同消息和渠道违反唯一键时影响 0 行。正常重投会先被 mq_consumed_message 挡住；若本组已成功领取
+        幂等键却仍冲突，Service 将其视为本地数据一致性异常并回滚，避免掩盖绕过正常链路的写入。
+    -->
+    <insert id="insertNotification"
+            parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqNotificationLog">
+        INSERT INTO mq_notification_log (
+            message_id, order_id, event_type, channel, status, content, created_at
+        ) VALUES (
+            #{messageId}, #{orderId}, #{eventType}, #{channel}, #{status}, #{content},
+            COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
+        )
+        ON CONFLICT (message_id, channel) DO NOTHING
+    </insert>
+
+    <select id="selectConsumedPage"
+            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage">
+        SELECT id,
+               consumer_name AS consumerName,
+               message_id AS messageId,
+               event_type AS eventType,
+               aggregate_id AS aggregateId,
+               consumed_at AS consumedAt
+        FROM mq_consumed_message
+        <where>
+            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
+        </where>
+        ORDER BY consumed_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countConsumed" resultType="long">
+        SELECT COUNT(*)
+        FROM mq_consumed_message
+        <where>
+            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
+        </where>
+    </select>
+
+    <select id="selectStatistics"
+            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqOrderStatistics">
+        SELECT id,
+               created_count AS createdCount,
+               paid_count AS paidCount,
+               cancelled_count AS cancelledCount,
+               created_amount AS createdAmount,
+               last_event_at AS lastEventAt,
+               updated_at AS updatedAt
+        FROM mq_order_statistics
+        WHERE id = 1
+    </select>
+
+    <select id="selectNotificationPage"
+            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqNotificationLog">
+        SELECT id,
+               message_id AS messageId,
+               order_id AS orderId,
+               event_type AS eventType,
+               channel,
+               status,
+               content,
+               created_at AS createdAt
+        FROM mq_notification_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countNotifications" resultType="long">
+        SELECT COUNT(*) FROM mq_notification_log
+    </select>
+
+</mapper>

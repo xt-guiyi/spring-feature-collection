@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-将现有 RabbitMQ 学习模块完整替换为独立的 RocketMQ 5.x 学习模块，统一接口前缀为：
+实现独立的 RocketMQ 5.x 学习模块，统一接口前缀为：
 
 ```text
 /api/playground/rocketmq/**
@@ -12,7 +12,7 @@
 RocketMQ 的开发者，因此配置、生产者、消费者、Controller、Service、Mapper XML、SQL 和部署文件都要包含
 有业务含义的中文注释。
 
-本次替换后，项目中不再保留 RabbitMQ 的依赖、配置、Java 包、Mapper、接口、文档或运行容器。
+本次替换后，项目中不再保留旧消息模块的依赖、配置、Java 包、Mapper、接口、文档或运行资源。
 
 ## 2. 技术选择
 
@@ -47,19 +47,18 @@ Starter 用于演示 Spring Boot 自动配置、`RocketMQClientTemplate` 和监�
 使用独立的 RocketMQ 网络和持久化卷，不修改现有 PostgreSQL、Redis、MongoDB 服务。主机端口避开 Spring Boot 常用的
 `8080`，应用通过本机 Proxy 地址连接，容器之间通过 Compose 服务名连接。
 
-## 3. RabbitMQ 清理边界
+## 3. 旧消息模块清理边界
 
-删除以下 RabbitMQ 专属内容：
+删除以下旧消息模块专属内容：
 
-- `spring-boot-starter-amqp`、`spring-rabbit-stream` 依赖。
-- `spring.rabbitmq`、`playground.rabbitmq` 配置。
-- `com.xt.xiaoxingxing.playground.rabbitmq` Java 包。
-- `src/main/resources/mapper/rabbitmq` Mapper XML。
-- RabbitMQ 学习指南、建表脚本、设计文档和实施计划。
-- 本机 `local-rabbitmq` Docker 容器。
+- 旧客户端与流式客户端依赖。
+- 旧连接配置和业务配置。
+- 旧 Java 业务包与 Mapper XML。
+- 旧学习指南、建表脚本、设计文档和实施计划。
+- 本机旧消息服务的容器、镜像、网络和数据卷。
 
 `mq_outbox_event`、`mq_consumed_message`、`mq_order_statistics`、`mq_notification_log`、`mq_transaction_record`
-表名是通用消息业务命名，不属于 RabbitMQ，因此继续保留或新增，并把其中 RabbitMQ 专属注释改为通用可靠消息或
+表名是通用消息业务命名，因此继续保留或新增，并把其中旧组件专属注释改为通用可靠消息或
 RocketMQ 语义。
 
 用户当前未提交的 MyBatis SQL 日志配置修改与本任务无关，必须原样保留。
@@ -85,8 +84,7 @@ RocketMQ 5.x 的 Topic 按消息类型区分。本模块分别创建：
 - 同一个 ConsumerGroup 内的实例共同分担消息。
 - 不同 ConsumerGroup 各自维护消费进度，因此都可以收到同一条消息，形成发布订阅效果。
 
-文档和注释需要明确指出：RabbitMQ 的 Exchange、Binding、RoutingKey 与 RocketMQ 的 Topic、Tag、订阅过滤不是
-一一对应关系，不能通过机械改名理解迁移。
+文档和注释需要分别讲清 Topic、Tag、Key、ConsumerGroup 与订阅过滤的职责，避免把这些概念混为一谈。
 
 ## 5. 学习功能
 
@@ -104,7 +102,7 @@ RocketMQ 5.x 的 Topic 按消息类型区分。本模块分别创建：
 - 重试和 DLQ：消费失败返回失败结果，达到最大重试次数后进入死信队列。
 - 批量请求和批量处理：接口一次接收多条业务消息，由发布适配层逐条或受控并发发送，并分别记录每条发送结果；
   注释明确区分“应用层批量请求”和“Broker 单次批量发送”，不假定所有 5.x gRPC Client 版本都提供相同的批量 API。
-- 消息版本：统一信封携带 `messageId`、`messageType`、`version`、`occurredAt`、`payload`。
+- 消息版本：统一信封携带 `messageId`、`eventType`、`schemaVersion`、`aggregateId`、`occurredAt`、`payload`。
 
 ### 5.2 Outbox 可靠订单入口
 
@@ -136,16 +134,28 @@ POST /api/playground/rocketmq/orders/transaction-message
 
 该入口与 Outbox 入口完全独立：
 
-1. 向 TRANSACTION Topic 发送半消息。
-2. Broker 保存半消息，但暂时不投递给消费者。
+1. 在独立短事务持久化 PREPARED 回查锚点。
+2. 向 TRANSACTION Topic 发送半消息，Broker 保存但暂时不投递。
 3. 事务监听器执行订单创建、库存扣减等 PostgreSQL 本地事务。
 4. 本地事务成功返回 COMMIT，失败返回 ROLLBACK。
 5. 结果不明确时返回 UNKNOWN，Broker 后续调用事务回查。
-6. 回查逻辑只查询数据库中可持久化的事务业务状态，不能依赖内存变量。
+6. 回查逻辑只依赖数据库中可持久化的事务业务状态，不能依赖内存变量；过期 PREPARED 必须先用条件更新
+   抢占 ROLLED_BACK 终态，抢占失败则重读最新状态，不能根据旧快照直接裁决。
 
 新增 `mq_transaction_record` 保存事务 ID、业务键和 `PREPARED`、`COMMITTED`、`ROLLED_BACK` 状态。发送半消息前先准备
 可查询的事务标识；本地订单事务成功时把记录改为 `COMMITTED`，明确失败时改为 `ROLLED_BACK`。Broker 回查时以这张表和
 订单事实为依据；仍在合理执行窗口内的 `PREPARED` 返回 UNKNOWN，超过保护窗口且没有订单事实时才按明确规则回滚。
+
+本地事务方法抛异常也不能直接等同于“数据库已回滚”：COMMIT 可能已经成功，只是响应因连接中断没有返回。
+异常分支必须先以 `PREPARED -> ROLLED_BACK` 条件更新竞争终态；更新失败后重读，`COMMITTED` 提交半消息、
+`ROLLED_BACK` 回滚半消息、状态仍不明确则保持半消息未决等待 Broker 回查。
+
+还必须覆盖“PREPARED 已提交，半消息尚未到 Broker 就崩溃”的窗口：Broker 没有半消息就不可能回查。
+应用定时分批读取过期 PREPARED 候选，再对每条执行与 checker 相同的条件回滚；0 行时重读并仅接受
+COMMITTED/ROLLED_BACK 持久终态。多实例、checker 和本地事务因此都由同一数据库状态机裁决。
+
+`business_key` 使用仅覆盖 PREPARED/COMMITTED 的 PostgreSQL 部分唯一索引。因此活跃或已成功事务拒绝同 orderNo 重复，
+ROLLED_BACK 则保留审计记录并释放新 transactionId 的受控重试资格。旧全局唯一约束与新索引的迁移必须在同一事务块中幂等执行。
 
 同一笔订单不能同时使用 Outbox 和 RocketMQ 事务消息，否则会产生两套发布路径和重复事件。两个入口的目的只是学习
 两种解决数据库与 MQ 双写一致性的方案。
@@ -220,7 +230,7 @@ com.xt.xiaoxingxing.playground.rocketmq
 - 复杂 Service：方法开头先写完整步骤，再用“第1步、第2步……”对应实现。
 - 关键语句：解释 MessageGroup、Tag、Key、消费结果、唯一约束和条件更新的目的。
 - 异常分支：解释为什么应该重试、为什么应该幂等返回、什么时候进入 DLQ。
-- 对比注释：必要处说明它与 RabbitMQ 概念的区别，但不保留 RabbitMQ 业务代码。
+- 对比注释：必要处说明 RocketMQ 与旧消息模型的区别，但不保留旧业务代码。
 - 生产提示：指出单节点 Compose 只适合学习，不代表生产高可用部署。
 
 ## 9. 文档与调用顺序
@@ -240,7 +250,7 @@ com.xt.xiaoxingxing.playground.rocketmq
 
 静态验收：
 
-- 项目中没有 RabbitMQ 依赖、配置、包名、Mapper 路径和旧学习文档残留。
+- 项目中没有旧消息模块的依赖、配置、包名、Mapper 路径和学习文档残留。
 - RocketMQ 的 Controller、生产、消费、Outbox、事务消息和 Mapper 引用链完整。
 - Topic 类型与消息发送方式匹配。
 - 所有消费者使用稳定、明确的 ConsumerGroup。
@@ -249,4 +259,4 @@ com.xt.xiaoxingxing.playground.rocketmq
 - 复杂方法具有步骤式中文注释，关键可靠性代码具有原因与失败路径注释。
 
 按照用户约束，不新增或运行测试，不执行 Maven 构建，也不启动应用。Docker 容器替换属于用户已经明确授权的运行环境
-操作；容器删除后不可通过原容器恢复，但 RabbitMQ 持久卷是否删除必须单独审慎处理，默认不删除未明确确认的数据卷。
+操作；容器和镜像可以重新创建或拉取，持久卷删除后其中的旧消息数据不可恢复。

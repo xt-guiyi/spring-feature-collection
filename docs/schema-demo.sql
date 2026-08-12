@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS mq_notification_log CASCADE;
 DROP TABLE IF EXISTS mq_order_statistics CASCADE;
 DROP TABLE IF EXISTS mq_consumed_message CASCADE;
+DROP TABLE IF EXISTS mq_transaction_record CASCADE;
 DROP TABLE IF EXISTS mq_outbox_event CASCADE;
 DROP TABLE IF EXISTS order_products CASCADE;
 DROP TABLE IF EXISTS orders CASCADE;
@@ -81,15 +82,24 @@ CREATE TABLE order_products (
     CONSTRAINT uk_order_product UNIQUE (order_id, product_id)
 );
 
--- RabbitMQ Transactional Outbox：订单和待发送事件处于同一个 PostgreSQL 本地事务。
+-- RocketMQ Transactional Outbox：订单和待发送事件处于同一个 PostgreSQL 本地事务。
+-- 本表只保存待发布事实；发布器采用 FOR UPDATE SKIP LOCKED 原子领取，消费者仍需幂等。
 CREATE TABLE mq_outbox_event (
     id VARCHAR(36) PRIMARY KEY,
     aggregate_type VARCHAR(50) NOT NULL,
     aggregate_id VARCHAR(100) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
     schema_version INT NOT NULL,
-    exchange_name VARCHAR(200) NOT NULL,
-    routing_key VARCHAR(200) NOT NULL,
+    -- Topic 是 RocketMQ 一级消息分类，例如订单事件 Topic。
+    topic_name VARCHAR(200) NOT NULL,
+    -- Tag 在 Topic 内过滤消息，消费者订阅表达式基于它选择事件类型。
+    message_tag VARCHAR(100) NOT NULL,
+    -- 稳定业务查询键；同一次 Outbox 重试不得改变。
+    message_key VARCHAR(200) NOT NULL,
+    -- FIFO 消息的组键；普通和延迟消息可为空。
+    message_group VARCHAR(200),
+    -- 延迟消息目标投递时间，发布器计算剩余延迟后交给 RocketMQ。
+    deliver_at TIMESTAMP,
     payload JSONB NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     retry_count INT NOT NULL DEFAULT 0,
@@ -107,7 +117,7 @@ CREATE INDEX idx_mq_outbox_publishable
 CREATE INDEX idx_mq_outbox_aggregate
     ON mq_outbox_event (aggregate_type, aggregate_id, created_at);
 
--- 每个消费者用 (consumer_name, message_id) 唯一键抵挡 RabbitMQ 至少一次投递产生的重复消息。
+-- 每个消费者用 (consumer_name, message_id) 唯一键抵挡 RocketMQ 至少一次投递产生的重复消息。
 CREATE TABLE mq_consumed_message (
     id BIGSERIAL PRIMARY KEY,
     consumer_name VARCHAR(100) NOT NULL,
@@ -146,6 +156,30 @@ CREATE TABLE mq_notification_log (
 
 CREATE INDEX idx_mq_notification_order
     ON mq_notification_log (order_id, created_at DESC);
+
+-- RocketMQ 事务消息回查依据：半消息先插 PREPARED，本地订单事务成功时更新为 COMMITTED。
+-- 回查不得相信内存状态；只有进行中/已提交记录占用 business_key，已回滚命令允许受控重试。
+CREATE TABLE mq_transaction_record (
+    transaction_id VARCHAR(36) PRIMARY KEY,
+    business_key VARCHAR(100) NOT NULL,
+    request_payload JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    order_id BIGINT,
+    last_error VARCHAR(1000),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_mq_transaction_status
+        CHECK (status IN ('PREPARED', 'COMMITTED', 'ROLLED_BACK'))
+);
+
+-- PostgreSQL 部分唯一索引将“业务键占用权”与持久状态绑定：
+-- PREPARED/COMMITTED 拒绝同 orderNo 并发重复，ROLLED_BACK 不占用键，可以使用新 transactionId 重试。
+CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
+    ON mq_transaction_record (business_key)
+    WHERE status IN ('PREPARED', 'COMMITTED');
+
+CREATE INDEX idx_mq_transaction_status_created
+    ON mq_transaction_record (status, created_at DESC);
 
 -- 3. 插入示例数据
 

@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
 import com.baomidou.mybatisplus.spring.MybatisSqlSessionFactoryBean;
-import org.apache.ibatis.logging.stdout.StdOutImpl;
+import org.apache.ibatis.logging.slf4j.Slf4jImpl;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,7 +20,7 @@ import javax.sql.DataSource;
 @MapperScan(
         basePackages = {
                 "com.xt.xiaoxingxing.playground.postgresql.mapper",
-                "com.xt.xiaoxingxing.playground.rabbitmq.mapper"
+                "com.xt.xiaoxingxing.playground.rocketmq.mapper"
         },
         sqlSessionFactoryRef = "playgroundSqlSessionFactory"
 )
@@ -40,9 +40,9 @@ public class PlaygroundMyBatisConfig {
         // userId、orderNo 等 Java 属性名；显式开启转换，避免依赖自动配置的隐式默认值。
         configuration.setMapUnderscoreToCamelCase(true);
         // 当前 SqlSessionFactory 是手动创建的，application.yaml 中的 MyBatis-Plus 自动配置
-        // 不一定会应用到这里，因此显式使用 StdOutImpl 将 SQL、参数和影响行数打印到控制台。
-        // 该方式适合学习和本地调试；生产环境应改用受日志级别控制的实现，并注意敏感参数脱敏。
-        configuration.setLogImpl(StdOutImpl.class);
+        // 不一定会应用到这里，因此这里也必须显式使用 SLF4J，避免 Java 配置重新覆盖 YAML。
+        // SQL 日志默认不会刷屏；需要排查时再通过 logging.level 按 Mapper 包名开启 DEBUG。
+        configuration.setLogImpl(Slf4jImpl.class);
         bean.setConfiguration(configuration);
         // 自定义 SqlSessionFactory 后需要显式指定 XML 路径，否则拆分后的普通 MyBatis
         // Mapper XML 可能不会被 Spring Boot 的默认自动配置加载。
