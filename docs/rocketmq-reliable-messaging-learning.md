@@ -18,13 +18,13 @@
 
 ## 1. 先认识五个运行组件
 
-| 组件 | 本地地址 | 主要职责 | 不负责什么 |
-|---|---|---|---|
-| NameServer | `localhost:9876` | 保存 Topic 到 Broker 的路由信息 | 不保存业务消息 |
-| Broker | `10909/10911/10912` | 持久化消息、维护消费进度、重试和死信 | 不提供本项目 Java 5.x gRPC 接入地址 |
-| Proxy | `localhost:18081` | 接收 RocketMQ 5.x gRPC 客户端请求并访问 Broker | 不替代 Broker 持久化消息 |
-| Dashboard | `http://localhost:18082` | 查看 Topic、消息、ConsumerGroup 和消费进度 | 不参与消息可靠传输 |
-| Init | 一次性容器 | 等 Broker 注册后创建四种 Topic 和 ConsumerGroup | 完成初始化后不常驻 |
+| 组件         | 本地地址                     | 主要职责                                   | 不负责什么                     |
+| ---------- | ------------------------ | -------------------------------------- | ------------------------- |
+| NameServer | `localhost:9876`         | 保存 Topic 到 Broker 的路由信息                | 不保存业务消息                   |
+| Broker     | `10909/10911/10912`      | 持久化消息、维护消费进度、重试和死信                     | 不提供本项目 Java 5.x gRPC 接入地址 |
+| Proxy      | `localhost:18081`        | 接收 RocketMQ 5.x gRPC 客户端请求并访问 Broker   | 不替代 Broker 持久化消息          |
+| Dashboard  | `http://localhost:18082` | 查看 Topic、消息、ConsumerGroup 和消费进度        | 不参与消息可靠传输                 |
+| Init       | 一次性容器                    | 等 Broker 注册后创建四种 Topic 和 ConsumerGroup | 完成初始化后不常驻                 |
 
 Java 配置中的 `ROCKETMQ_ENDPOINTS` 应填写 Proxy 的 `localhost:18081`，不是 NameServer 的 `9876`。
 
@@ -44,12 +44,12 @@ docker compose run --rm rocketmq-init
 
 初始化任务创建以下 Topic：
 
-| Topic | 类型 | 用途 |
-|---|---|---|
-| `pg_learning_normal` | NORMAL | 普通、异步、Tag、重试、订单业务事件 |
-| `pg_learning_fifo` | FIFO | 按 MessageGroup 保证局部顺序 |
-| `pg_learning_delay` | DELAY | 任意延迟和订单超时检查 |
-| `pg_learning_transaction` | TRANSACTION | RocketMQ 事务半消息 |
+| Topic                     | 类型          | 用途                    |
+| ------------------------- | ----------- | --------------------- |
+| `pg_learning_normal`      | NORMAL      | 普通、异步、Tag、重试、订单业务事件   |
+| `pg_learning_fifo`        | FIFO        | 按 MessageGroup 保证局部顺序 |
+| `pg_learning_delay`       | DELAY       | 任意延迟和订单超时检查           |
+| `pg_learning_transaction` | TRANSACTION | RocketMQ 事务半消息        |
 
 本 Compose 固定使用 RocketMQ 5.5.0，该版本 Proxy 默认开启 Topic 消息类型校验。向 FIFO Topic 发送普通消息、
 向 NORMAL Topic 发送事务消息会被拒绝，因此本案例明确拆成四个 Topic。这个校验发生在 Proxy，不能通过给
@@ -75,7 +75,8 @@ docker compose run --rm postgres-demo-init
 docker exec -i local-postgres psql -U root -d demo \
   < ../spring-feature-collection/docs/schema-demo.sql
 
-# RocketMQ 可靠消息表脚本可重复执行，不会删除订单等基础业务表。
+# RocketMQ 脚本只重建 5 张 mq_* 学习表，不会删除 users、products、orders 等基础业务表。
+# 它不是增量迁移脚本，重复执行会清空已有的 RocketMQ 学习记录。
 docker exec -i local-postgres psql -U root -d demo \
   < ../spring-feature-collection/docs/rocketmq-reliable-messaging-schema.sql
 ```
@@ -121,15 +122,15 @@ Tag 是 Topic 内的二级分类。本项目使用：
 Broker 路由命中，不能证明 JSON 信封的 `eventType` 与 Tag 相符。`RocketConsumerSupport` 在调用业务 handler 前
 还会校验以下显式契约：
 
-| 监听器用途 | 实际 Tag | 允许的 envelope.eventType |
-|---|---|---|
-| 普通/FIFO/延迟/多组 Demo | `DEMO` | `DEMO_MESSAGE` |
-| 重试 Demo | `RETRY_DEMO` | `DEMO_MESSAGE` |
-| 普通订单事件 | `ORDER_CREATED` | `ORDER_CREATED` |
-| 普通订单事件 | `ORDER_PAID` | `ORDER_PAID` |
-| 普通订单事件 | `ORDER_CANCELLED` | `ORDER_CANCELLED` |
-| 订单超时检查 | `ORDER_PAYMENT_TIMEOUT_CHECK` | `ORDER_PAYMENT_TIMEOUT_CHECK` |
-| 事务半消息 | `ORDER_CREATED` | `TRANSACTION_ORDER_CREATED` |
+| 监听器用途              | 实际 Tag                        | 允许的 envelope.eventType        |
+| ------------------ | ----------------------------- | ----------------------------- |
+| 普通/FIFO/延迟/多组 Demo | `DEMO`                        | `DEMO_MESSAGE`                |
+| 重试 Demo            | `RETRY_DEMO`                  | `DEMO_MESSAGE`                |
+| 普通订单事件             | `ORDER_CREATED`               | `ORDER_CREATED`               |
+| 普通订单事件             | `ORDER_PAID`                  | `ORDER_PAID`                  |
+| 普通订单事件             | `ORDER_CANCELLED`             | `ORDER_CANCELLED`             |
+| 订单超时检查             | `ORDER_PAYMENT_TIMEOUT_CHECK` | `ORDER_PAYMENT_TIMEOUT_CHECK` |
+| 事务半消息              | `ORDER_CREATED`               | `TRANSACTION_ORDER_CREATED`   |
 
 事务 Topic 虽然复用 `ORDER_CREATED` Tag，但它的信封事件是独立的
 `TRANSACTION_ORDER_CREATED`，不能与普通 Topic 的创建事件混用。缺失 Tag、Tag 不在允许表中或
@@ -431,7 +432,8 @@ CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
 - 多个重试并发：部分唯一索引只允许一条新 `PREPARED` 成功。
 
 状态更新和索引成员变化在同一 PostgreSQL 事务中原子提交，不需要先删记录或手工释放键。
-独立建表脚本还会安全迁移旧版列级全局 `UNIQUE`；删除旧约束与创建新索引在同一事务块中，可重复执行。
+本学习项目的独立建表脚本直接创建上面的部分唯一索引，不包含旧结构迁移逻辑；重复执行脚本会重建
+5 张 `mq_*` 表并清空其中的学习记录。
 
 ### 7.3 其他失败分支与 Broker 回查
 
@@ -445,11 +447,11 @@ CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
 
 回查映射：
 
-| 持久状态 | 回查结果 |
-|---|---|
-| `COMMITTED` | `COMMIT` |
-| `ROLLED_BACK` | `ROLLBACK` |
-| 尚未超时的 `PREPARED` | `UNKNOWN`，稍后再查 |
+| 持久状态                   | 回查结果                                            |
+| ---------------------- | ----------------------------------------------- |
+| `COMMITTED`            | `COMMIT`                                        |
+| `ROLLED_BACK`          | `ROLLBACK`                                      |
+| 尚未超时的 `PREPARED`       | `UNKNOWN`，稍后再查                                  |
 | 已超时且没有订单事实的 `PREPARED` | 先用数据库条件更新抢占 `ROLLED_BACK` 终态；抢占成功才返回 `ROLLBACK` |
 
 过期判断本身不能直接向 Broker 返回 `ROLLBACK`。回查必须先在独立短事务中执行
@@ -461,14 +463,14 @@ CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
 
 ## 8. Outbox 与事务消息如何选择
 
-| 对比项 | Transactional Outbox | RocketMQ 事务消息 |
-|---|---|---|
-| 绑定 MQ 厂商 | 低，本地消息表是通用模式 | 高，依赖 RocketMQ 半消息和回查协议 |
-| 主事务路径 | 只写数据库，MQ 发布异步完成 | 主流程需要与 Broker 交互 |
-| 消息延迟 | 受轮询周期影响 | commit 后较快可见 |
-| 运维重点 | Outbox 堆积、锁恢复、发布重试 | 半消息回查、事务记录、UNKNOWN 时长 |
-| 迁移其他 MQ | 发布适配器可替换 | 需要重做事务协调机制 |
-| 共同要求 | 消费幂等、状态条件更新、监控、补偿 | 消费幂等、状态条件更新、监控、补偿 |
+| 对比项      | Transactional Outbox | RocketMQ 事务消息          |
+| -------- | -------------------- | ---------------------- |
+| 绑定 MQ 厂商 | 低，本地消息表是通用模式         | 高，依赖 RocketMQ 半消息和回查协议 |
+| 主事务路径    | 只写数据库，MQ 发布异步完成      | 主流程需要与 Broker 交互       |
+| 消息延迟     | 受轮询周期影响              | commit 后较快可见           |
+| 运维重点     | Outbox 堆积、锁恢复、发布重试   | 半消息回查、事务记录、UNKNOWN 时长  |
+| 迁移其他 MQ  | 发布适配器可替换             | 需要重做事务协调机制             |
+| 共同要求     | 消费幂等、状态条件更新、监控、补偿    | 消费幂等、状态条件更新、监控、补偿      |
 
 二者解决的核心问题相同：避免“数据库成功、消息丢失”这种双写不一致；解决步骤和依赖边界不同。
 

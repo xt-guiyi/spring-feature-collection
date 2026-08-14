@@ -34,8 +34,19 @@
 			这里不另外强制覆盖 rocketmq-client-java 版本，让 Starter 使用它发布时验证过的客户端组合。
 		-->
 		<rocketmq-spring.version>2.3.6</rocketmq-spring.version>
+		<!-- XXL-JOB 3.4.2 的官方构建基线与本项目一致：Spring Boot 4.1 / JDK 17+。 -->
+		<xxl-job.version>3.4.2</xxl-job.version>
 	</properties>
 	<dependencies>
+		<!--
+			XXL-JOB 官方只提供 core，并未提供 Spring Boot 自动配置 Starter。
+			本项目显式创建唯一的 XxlJobSpringExecutor Bean，便于学习其注册、回调与停机生命周期。
+		-->
+		<dependency>
+			<groupId>com.xuxueli</groupId>
+			<artifactId>xxl-job-core</artifactId>
+			<version>${xxl-job.version}</version>
+		</dependency>
 		<!--
 			RocketMQ 5.x 可靠消息学习模块：
 			1. Starter 自动创建 RocketMQClientTemplate，生产者无需手工管理客户端生命周期；

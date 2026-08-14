@@ -1,6 +1,5 @@
 package com.xt.xiaoxingxing.playground.rocketmq.dto.request;
 
-import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -14,7 +13,7 @@ public class RocketBatchMessageItemRequest {
     @Size(max = 500, message = "items中的text最多500个字符")
     private String text;
 
-    @NotBlank(message = "items中的tag不能为空")
-    @Pattern(regexp = "[A-Za-z0-9_]+", message = "items中的tag只能包含字母、数字或下划线")
-    private String tag = RocketMqNames.TAG_DEMO;
+    /** 未传或传空字符串时使用 YAML 的演示 Tag；非空值仍限制为安全字符集。 */
+    @Pattern(regexp = "^$|[A-Za-z0-9_]+$", message = "items中的tag只能为空，或包含字母、数字、下划线")
+    private String tag;
 }

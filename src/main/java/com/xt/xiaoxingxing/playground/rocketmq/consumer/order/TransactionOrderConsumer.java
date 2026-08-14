@@ -1,6 +1,7 @@
 package com.xt.xiaoxingxing.playground.rocketmq.consumer.order;
 
-import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningListener;
 import com.xt.xiaoxingxing.playground.rocketmq.service.RocketOrderConsumerService;
 import com.xt.xiaoxingxing.playground.rocketmq.support.RocketConsumerSupport;
 import lombok.RequiredArgsConstructor;
@@ -12,19 +13,23 @@ import org.springframework.stereotype.Component;
 
 /** 事务消息组：只有 COMMIT 的半消息才可见，ROLLED_BACK 半消息不会进入本监听器。 */
 @Component
+@RocketMqLearningListener
 @RequiredArgsConstructor
-@RocketMQMessageListener(endpoints = "${playground.rocketmq.endpoints}",
-        topic = RocketMqNames.TRANSACTION_TOPIC, consumerGroup = RocketMqNames.TRANSACTION_ORDER_GROUP,
-        tag = RocketMqNames.TAG_ORDER_CREATED, sslEnabled = false)
+@RocketMQMessageListener(endpoints = "${playground.rocketmq.endpoints}", accessKey = "${playground.rocketmq.consumer.access-key}",
+        secretKey = "${playground.rocketmq.consumer.secret-key}", namespace = "${playground.rocketmq.consumer.namespace}",
+        filterExpressionType = "${playground.rocketmq.consumer.filter-expression-type}",
+        topic = "${playground.rocketmq.topics.transaction}", consumerGroup = "${playground.rocketmq.consumer-groups.transaction-order}",
+        tag = "${playground.rocketmq.tags.order-created}")
 public class TransactionOrderConsumer implements RocketMQListener {
 
     private final RocketConsumerSupport consumerSupport;
     private final RocketOrderConsumerService consumerService;
+    private final RocketMqLearningProperties properties;
 
     @Override
     public ConsumeResult consume(MessageView messageView) {
         return consumerSupport.handle(
-                messageView, RocketMqNames.TRANSACTION_ORDER_GROUP,
-                RocketConsumerSupport.TRANSACTION_ORDER_ROUTE_CONTRACT, consumerService::handleTransactionOrder);
+                messageView, properties.getConsumerGroups().getTransactionOrder(),
+                consumerSupport.transactionOrderRouteContract(), consumerService::handleTransactionOrder);
     }
 }

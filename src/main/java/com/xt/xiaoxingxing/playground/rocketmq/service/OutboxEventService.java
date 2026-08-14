@@ -87,7 +87,15 @@ public class OutboxEventService {
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public boolean markFailed(MqOutboxEvent event, String error) {
         int currentRetry = event.getRetryCount() == null ? 0 : event.getRetryCount();
-        long delaySeconds = Math.min(300L, 5L * (1L << Math.min(currentRetry, 6)));
+        RocketMqLearningProperties.Retry retry = properties.getOutbox().getRetry();
+        // 第1次失败等待 initialDelay；随后指数翻倍；达到 maxExponent 后不再扩大，且永远不超过 maxDelay。
+        long multiplier = 1L << Math.min(currentRetry, retry.getMaxExponent());
+        long maxDelaySeconds = retry.getMaxDelaySeconds();
+        long initialDelaySeconds = retry.getInitialDelaySeconds();
+        // 先用除法判断乘法是否会超过上限，避免配置较大时 long 溢出成负数，反而生成过去的重试时间。
+        long delaySeconds = initialDelaySeconds > maxDelaySeconds / multiplier
+                ? maxDelaySeconds
+                : Math.min(maxDelaySeconds, initialDelaySeconds * multiplier);
         LocalDateTime nextRetryAt = LocalDateTime.now().plusSeconds(delaySeconds);
         String conciseError = concise(error);
         return outboxEventMapper.markFailed(

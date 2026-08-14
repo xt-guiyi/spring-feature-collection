@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder;
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgOrderProduct;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
 import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
 import com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage;
 import com.xt.xiaoxingxing.playground.rocketmq.entity.MqNotificationLog;
@@ -36,6 +37,7 @@ public class RocketOrderConsumerService {
     private final OutboxEventService outboxEventService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ObjectMapper objectMapper;
+    private final RocketMqLearningProperties properties;
 
     /**
      * 删除商品缓存。数据库幂等记录和 Redis 无法组成一个本地事务，但删除操作本身可以安全重复。
@@ -44,7 +46,7 @@ public class RocketOrderConsumerService {
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
     public ConsumeBusinessResult handleCache(RocketMessageEnvelope<JsonNode> envelope) {
         // 第1步：唯一约束裁决同组并发重复；不同 ConsumerGroup 使用不同 consumerName，各自仍会处理一份。
-        if (!claim(envelope, RocketMqNames.ORDER_CACHE_GROUP)) {
+        if (!claim(envelope, properties.getConsumerGroups().getOrderCache())) {
             return ConsumeBusinessResult.DUPLICATE;
         }
         // 第2步：先校验 payload，再执行可安全重试的缓存失效。
@@ -61,7 +63,7 @@ public class RocketOrderConsumerService {
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
     public ConsumeBusinessResult handleStatistics(RocketMessageEnvelope<JsonNode> envelope) {
         // 第1步：只有首次插入幂等记录的一方拥有更新统计的资格。
-        if (!claim(envelope, RocketMqNames.ORDER_STATISTICS_GROUP)) {
+        if (!claim(envelope, properties.getConsumerGroups().getOrderStatistics())) {
             return ConsumeBusinessResult.DUPLICATE;
         }
         // 第2步：数据库 UPSERT 原子累计；异常会让领取记录一起回滚，Broker 重试后仍可继续处理。
@@ -76,7 +78,7 @@ public class RocketOrderConsumerService {
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
     public ConsumeBusinessResult handleNotification(RocketMessageEnvelope<JsonNode> envelope) {
         // 第1步：同一通知组对同一业务 messageId 只执行一次。
-        if (!claim(envelope, RocketMqNames.ORDER_NOTIFICATION_GROUP)) {
+        if (!claim(envelope, properties.getConsumerGroups().getOrderNotification())) {
             return ConsumeBusinessResult.DUPLICATE;
         }
         // 第2步：通知日志与幂等记录同事务提交，失败返回 FAILURE 后由 Broker 重试，耗尽后进入该组 DLQ。
@@ -100,7 +102,7 @@ public class RocketOrderConsumerService {
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
     public ConsumeBusinessResult handleTimeout(RocketMessageEnvelope<JsonNode> envelope) {
         // 第1步：RocketMQ 是至少一次投递；唯一约束是跨线程、跨实例的最终幂等兜底。
-        if (!claim(envelope, RocketMqNames.ORDER_TIMEOUT_GROUP)) {
+        if (!claim(envelope, properties.getConsumerGroups().getOrderTimeout())) {
             return ConsumeBusinessResult.DUPLICATE;
         }
 
@@ -127,7 +129,7 @@ public class RocketOrderConsumerService {
         // 第5步：取消事件仍使用 Outbox；若本事务回滚，状态、库存、幂等记录和消息意图会一起回滚。
         OrderEventPayload cancelled = RocketOrderApplicationService.buildPayload(order, items);
         outboxEventService.append(String.valueOf(order.getId()), RocketMqNames.EVENT_ORDER_CANCELLED,
-                RocketMqNames.NORMAL_TOPIC, RocketMqNames.TAG_ORDER_CANCELLED,
+                properties.getTopics().getNormal(), properties.getTags().getOrderCancelled(),
                 order.getOrderNo(), null, null, cancelled);
         return ConsumeBusinessResult.PROCESSED;
     }
@@ -141,7 +143,7 @@ public class RocketOrderConsumerService {
     @Transactional(transactionManager = "playgroundTransactionManager", rollbackFor = Exception.class)
     public ConsumeBusinessResult handleTransactionOrder(RocketMessageEnvelope<JsonNode> envelope) {
         // 第1步：半消息 COMMIT 后仍遵循至少一次消费，必须先领取该事务消费者的唯一幂等键。
-        if (!claim(envelope, RocketMqNames.TRANSACTION_ORDER_GROUP)) {
+        if (!claim(envelope, properties.getConsumerGroups().getTransactionOrder())) {
             return ConsumeBusinessResult.DUPLICATE;
         }
         // 第2步：消息内只有持久命令；以 COMMITTED 记录关联的 orderId 读取最终订单事实，不相信内存状态。

@@ -61,7 +61,7 @@ public class RocketOrderApplicationService {
         // 第3步：不同 ConsumerGroup 会各自收到创建事件，分别处理缓存、统计和通知。
         String createdMessageId = outboxEventService.append(
                 String.valueOf(order.getOrderId()), RocketMqNames.EVENT_ORDER_CREATED,
-                RocketMqNames.NORMAL_TOPIC, RocketMqNames.TAG_ORDER_CREATED,
+                properties.getTopics().getNormal(), properties.getTags().getOrderCreated(),
                 order.getOrderNo(), null, null, payload);
 
         // 第4步：延迟消息只是未来触发检查，真正能否取消由数据库 PENDING 条件更新裁决。
@@ -69,7 +69,7 @@ public class RocketOrderApplicationService {
                 .plus(Duration.ofMillis(properties.getOrderTimeoutMillis()));
         String timeoutMessageId = outboxEventService.append(
                 String.valueOf(order.getOrderId()), RocketMqNames.EVENT_ORDER_PAYMENT_TIMEOUT_CHECK,
-                RocketMqNames.DELAY_TOPIC, RocketMqNames.TAG_ORDER_TIMEOUT,
+                properties.getTopics().getDelay(), properties.getTags().getOrderTimeout(),
                 order.getOrderNo(), null, deliverAt, payload);
 
         // 第5步：返回的是应用业务消息 ID；实际 Broker 投递由 Outbox 调度器异步推进。
@@ -112,7 +112,7 @@ public class RocketOrderApplicationService {
 
         // 第4步：数据库状态和消息意图一次提交；直接在事务里发 Broker 会重新引入双写窗口。
         outboxEventService.append(String.valueOf(orderId), RocketMqNames.EVENT_ORDER_PAID,
-                RocketMqNames.NORMAL_TOPIC, RocketMqNames.TAG_ORDER_PAID,
+                properties.getTopics().getNormal(), properties.getTags().getOrderPaid(),
                 paid.getOrderNo(), null, null, payload);
         return true;
     }

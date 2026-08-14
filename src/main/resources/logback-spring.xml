@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <!--
+        日志格式与根级别属于运行配置：开发环境可更详细、生产环境可更克制。
+        springProperty 从 application*.yaml 的 logging.pattern.console / logging.level.root 读取，
+        因此 XML 只保留日志结构，不再固化任何环境值。
+    -->
+    <springProperty scope="context" name="CONSOLE_LOG_PATTERN" source="logging.pattern.console"/>
+    <springProperty scope="context" name="ROOT_LOG_LEVEL" source="logging.level.root"/>
+
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>
-                %d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) %magenta(${PID:- }) --- [%15.15thread] %cyan(%-40.40logger{39}) : %highlight(%msg%n)
-            </pattern>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
         </encoder>
     </appender>
 
-    <root level="INFO">
+    <root level="${ROOT_LOG_LEVEL}">
         <appender-ref ref="CONSOLE" />
     </root>
 </configuration>

@@ -6,6 +6,7 @@ import com.xt.xiaoxingxing.playground.rocketmq.service.RocketTransactionRecordSe
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -23,11 +24,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "playground.rocketmq", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class PreparedTransactionCleanupScheduler {
 
-    /** 调度频率只影响过期后多久被发现；真正安全窗口由 transactionPreparedTimeoutSeconds 决定。 */
-    private static final long CLEANUP_FIXED_DELAY_MILLIS = 30_000L;
     private static final String CLEANUP_REASON =
             "事务PREPARED超过保护窗口，主动清理器收口为ROLLED_BACK";
 
@@ -35,7 +35,9 @@ public class PreparedTransactionCleanupScheduler {
     private final RocketMqLearningProperties properties;
     private final AtomicBoolean cleaning = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelay = CLEANUP_FIXED_DELAY_MILLIS, initialDelay = CLEANUP_FIXED_DELAY_MILLIS)
+    /** 调度频率只影响过期后多久被发现；真正安全窗口由 transactionPreparedTimeoutSeconds 决定。 */
+    @Scheduled(fixedDelayString = "${playground.rocketmq.transaction-cleanup.fixed-delay-millis}",
+            initialDelayString = "${playground.rocketmq.transaction-cleanup.initial-delay-millis}")
     public void closeExpiredPreparedRecords() {
         // fixedDelay 默认不会在单线程调度器中重入，AtomicBoolean 仍作为未来改为多线程时的本进程防线。
         if (!cleaning.compareAndSet(false, true)) {

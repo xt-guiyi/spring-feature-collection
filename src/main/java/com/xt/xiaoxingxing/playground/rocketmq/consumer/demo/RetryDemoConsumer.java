@@ -1,7 +1,8 @@
 package com.xt.xiaoxingxing.playground.rocketmq.consumer.demo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningListener;
 import com.xt.xiaoxingxing.playground.rocketmq.message.DemoMessagePayload;
 import com.xt.xiaoxingxing.playground.rocketmq.support.RocketConsumerSupport;
 import lombok.RequiredArgsConstructor;
@@ -18,19 +19,23 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@RocketMqLearningListener
 @RequiredArgsConstructor
-@RocketMQMessageListener(endpoints = "${playground.rocketmq.endpoints}",
-        topic = RocketMqNames.NORMAL_TOPIC, consumerGroup = RocketMqNames.RETRY_DEMO_GROUP,
-        tag = RocketMqNames.TAG_RETRY, sslEnabled = false)
+@RocketMQMessageListener(endpoints = "${playground.rocketmq.endpoints}", accessKey = "${playground.rocketmq.consumer.access-key}",
+        secretKey = "${playground.rocketmq.consumer.secret-key}", namespace = "${playground.rocketmq.consumer.namespace}",
+        filterExpressionType = "${playground.rocketmq.consumer.filter-expression-type}",
+        topic = "${playground.rocketmq.topics.normal}", consumerGroup = "${playground.rocketmq.consumer-groups.retry-demo}",
+        tag = "${playground.rocketmq.tags.retry}")
 public class RetryDemoConsumer implements RocketMQListener {
 
     private final RocketConsumerSupport consumerSupport;
     private final ObjectMapper objectMapper;
+    private final RocketMqLearningProperties properties;
 
     @Override
     public ConsumeResult consume(MessageView messageView) {
-        return consumerSupport.handle(messageView, RocketMqNames.RETRY_DEMO_GROUP,
-                RocketConsumerSupport.RETRY_ROUTE_CONTRACT, envelope -> {
+        return consumerSupport.handle(messageView, properties.getConsumerGroups().getRetryDemo(),
+                consumerSupport.retryRouteContract(), envelope -> {
             DemoMessagePayload payload = objectMapper.treeToValue(envelope.getPayload(), DemoMessagePayload.class);
             int failTimes = payload.getFailTimes() == null ? 0 : payload.getFailTimes();
             int attempt = messageView.getDeliveryAttempt();

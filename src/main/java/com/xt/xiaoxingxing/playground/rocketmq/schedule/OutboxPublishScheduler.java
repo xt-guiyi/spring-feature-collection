@@ -1,7 +1,7 @@
 package com.xt.xiaoxingxing.playground.rocketmq.schedule;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
 import com.xt.xiaoxingxing.playground.rocketmq.entity.MqOutboxEvent;
 import com.xt.xiaoxingxing.playground.rocketmq.message.RocketMessageEnvelope;
 import com.xt.xiaoxingxing.playground.rocketmq.service.OutboxEventService;
@@ -11,6 +11,7 @@ import com.xt.xiaoxingxing.playground.rocketmq.support.RocketPublishResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -22,15 +23,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** 从 PostgreSQL 领取 Outbox，按 Topic 类型可靠发布并推进状态。 */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "playground.rocketmq", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class OutboxPublishScheduler {
 
     private final OutboxEventService outboxEventService;
     private final RocketMessageCodec messageCodec;
     private final RocketMessagePublisher publisher;
+    private final RocketMqLearningProperties properties;
     private final AtomicBoolean publishing = new AtomicBoolean(false);
 
-    @Scheduled(fixedDelayString = "${playground.rocketmq.outbox.fixed-delay-millis:3000}")
+    @Scheduled(fixedDelayString = "${playground.rocketmq.outbox.fixed-delay-millis}")
     public void publishPendingEvents() {
         if (!publishing.compareAndSet(false, true)) {
             log.debug("上一轮Outbox仍在发布，本轮跳过");
@@ -63,14 +66,16 @@ public class OutboxPublishScheduler {
             // 第1步：恢复信封时也校验协议版本，坏消息有限失败后进入 DEAD，避免静默丢弃。
             RocketMessageEnvelope<JsonNode> envelope = messageCodec.fromJson(event.getPayload());
 
-            // 第2步：DELAY Topic 计算剩余延迟，最低一秒；Outbox 轮询晚到时仍让 Broker 明确走延迟 API。
+            // 第2步：DELAY Topic 计算剩余延迟；最低值来自 YAML，避免过期事件误走普通发送 API。
             RocketPublishResult result;
-            if (RocketMqNames.DELAY_TOPIC.equals(event.getTopicName())) {
-                long millis = event.getDeliverAt() == null ? 1_000L
-                        : Math.max(1_000L, ChronoUnit.MILLIS.between(LocalDateTime.now(), event.getDeliverAt()));
+            if (properties.getTopics().getDelay().equals(event.getTopicName())) {
+                long minimumDelayMillis = properties.getOutbox().getMinimumBrokerDelayMillis();
+                long millis = event.getDeliverAt() == null ? minimumDelayMillis
+                        : Math.max(minimumDelayMillis,
+                                ChronoUnit.MILLIS.between(LocalDateTime.now(), event.getDeliverAt()));
                 result = publisher.publishDelay(event.getTopicName(), event.getMessageTag(), event.getMessageKey(),
                         Duration.ofMillis(millis), envelope);
-            } else if (RocketMqNames.NORMAL_TOPIC.equals(event.getTopicName())) {
+            } else if (properties.getTopics().getNormal().equals(event.getTopicName())) {
                 result = publisher.publishNormal(
                         event.getTopicName(), event.getMessageTag(), event.getMessageKey(), envelope);
             } else {

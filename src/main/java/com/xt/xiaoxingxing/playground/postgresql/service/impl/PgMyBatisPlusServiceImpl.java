@@ -201,7 +201,10 @@ public class PgMyBatisPlusServiceImpl implements PgMyBatisPlusService {
         BusinessAssert.isTrue(product != null && BusinessAssert.hasText(product.getName()), "商品名称不能为空");
         BusinessAssert.isTrue(product.getPrice() != null && product.getPrice().signum() >= 0, "商品价格不能为负数");
         BusinessAssert.isTrue(product.getStock() != null && product.getStock() >= 0, "商品库存不能为负数");
-        BusinessAssert.isTrue(executeUniqueWrite(() ->productMapper.insert(product),"不能重复添加相同商品") == 1, "商品创建失败");
+        // 商品名称不是业务唯一键：同名商品可能对应不同型号、规格或销售批次。
+        // 因此这里与普通 MyBatis 入口保持一致，直接插入并以数据库生成的 id 区分商品，
+        // 不再用 executeUniqueWrite 给出“同名商品不能重复”的误导提示。
+        BusinessAssert.isTrue(productMapper.insert(product) == 1, "商品创建失败");
         return product.getId();
     }
 

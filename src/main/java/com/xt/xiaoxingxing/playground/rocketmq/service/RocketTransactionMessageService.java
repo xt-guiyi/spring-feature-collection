@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.CompleteOrderCreateRequest;
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder;
 import com.xt.xiaoxingxing.playground.postgresql.vo.CompleteOrderResponse;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
 import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
 import com.xt.xiaoxingxing.playground.rocketmq.entity.MqTransactionRecord;
 import com.xt.xiaoxingxing.playground.rocketmq.mapper.MqOrderBusinessMapper;
@@ -29,6 +30,7 @@ public class RocketTransactionMessageService {
 
     private final RocketMessageCodec messageCodec;
     private final RocketMessagePublisher publisher;
+    private final RocketMqLearningProperties properties;
     private final RocketTransactionRecordService recordService;
     private final RocketTransactionLocalService localService;
     private final MqOrderBusinessMapper orderBusinessMapper;
@@ -56,7 +58,7 @@ public class RocketTransactionMessageService {
             // 否则数据库会留下一个 Broker 从未见过、也永远不会主动回查的孤儿事务记录。
             RocketMessageEnvelope<JsonNode> envelope = messageCodec.newEnvelope(
                     RocketMqNames.EVENT_TRANSACTION_ORDER_CREATED, transactionId, command);
-            half = publisher.beginTransaction(RocketMqNames.TRANSACTION_TOPIC, RocketMqNames.TAG_ORDER_CREATED,
+            half = publisher.beginTransaction(properties.getTopics().getTransaction(), properties.getTags().getOrderCreated(),
                     businessKey, transactionId, envelope);
         } catch (RuntimeException sendFailure) {
             try {

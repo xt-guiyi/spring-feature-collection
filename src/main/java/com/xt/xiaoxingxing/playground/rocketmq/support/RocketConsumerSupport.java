@@ -1,6 +1,7 @@
 package com.xt.xiaoxingxing.playground.rocketmq.support;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqLearningProperties;
 import com.xt.xiaoxingxing.playground.rocketmq.message.RocketMessageEnvelope;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,12 +17,6 @@ import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.EVENT
 import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.EVENT_ORDER_PAID;
 import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.EVENT_ORDER_PAYMENT_TIMEOUT_CHECK;
 import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.EVENT_TRANSACTION_ORDER_CREATED;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_DEMO;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_ORDER_CANCELLED;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_ORDER_CREATED;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_ORDER_PAID;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_ORDER_TIMEOUT;
-import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_RETRY;
 
 /**
  * 所有监听器共用的消费生命周期模板。
@@ -35,29 +30,36 @@ import static com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames.TAG_R
 @RequiredArgsConstructor
 public class RocketConsumerSupport {
 
-    /** DEMO Tag 只能携带 DEMO_MESSAGE 事件，NORMAL/FIFO/DELAY 演示组共用。 */
-    public static final Map<String, String> DEMO_ROUTE_CONTRACT = Map.of(
-            TAG_DEMO, EVENT_DEMO_MESSAGE);
+    private final RocketMessageCodec codec;
+    private final RocketMqLearningProperties properties;
 
-    /** RETRY_DEMO Tag 仍是演示负载，重试只是消费失败策略，不是新事件类型。 */
-    public static final Map<String, String> RETRY_ROUTE_CONTRACT = Map.of(
-            TAG_RETRY, EVENT_DEMO_MESSAGE);
+    /** DEMO Tag 只能携带 DEMO_MESSAGE 事件，NORMAL/FIFO/DELAY 演示组共用。 */
+    public Map<String, String> demoRouteContract() {
+        return Map.of(properties.getTags().getDemo(), EVENT_DEMO_MESSAGE);
+    }
+
+    /** RETRY Tag 仍是演示负载，重试只是消费失败策略，不是新事件类型。 */
+    public Map<String, String> retryRouteContract() {
+        return Map.of(properties.getTags().getRetry(), EVENT_DEMO_MESSAGE);
+    }
 
     /** 普通订单 Topic 的三个 Tag 必须与同名业务事件一一对应。 */
-    public static final Map<String, String> ORDER_EVENT_ROUTE_CONTRACT = Map.of(
-            TAG_ORDER_CREATED, EVENT_ORDER_CREATED,
-            TAG_ORDER_PAID, EVENT_ORDER_PAID,
-            TAG_ORDER_CANCELLED, EVENT_ORDER_CANCELLED);
+    public Map<String, String> orderEventRouteContract() {
+        return Map.of(
+                properties.getTags().getOrderCreated(), EVENT_ORDER_CREATED,
+                properties.getTags().getOrderPaid(), EVENT_ORDER_PAID,
+                properties.getTags().getOrderCancelled(), EVENT_ORDER_CANCELLED);
+    }
 
     /** 超时 Tag 只允许进入“重新检查付款状态”处理器。 */
-    public static final Map<String, String> ORDER_TIMEOUT_ROUTE_CONTRACT = Map.of(
-            TAG_ORDER_TIMEOUT, EVENT_ORDER_PAYMENT_TIMEOUT_CHECK);
+    public Map<String, String> orderTimeoutRouteContract() {
+        return Map.of(properties.getTags().getOrderTimeout(), EVENT_ORDER_PAYMENT_TIMEOUT_CHECK);
+    }
 
-    /** 事务 Topic 复用 ORDER_CREATED Tag，但信封必须是独立的事务事件类型。 */
-    public static final Map<String, String> TRANSACTION_ORDER_ROUTE_CONTRACT = Map.of(
-            TAG_ORDER_CREATED, EVENT_TRANSACTION_ORDER_CREATED);
-
-    private final RocketMessageCodec codec;
+    /** 事务 Topic 复用创建订单 Tag，但信封必须是独立的事务事件类型。 */
+    public Map<String, String> transactionOrderRouteContract() {
+        return Map.of(properties.getTags().getOrderCreated(), EVENT_TRANSACTION_ORDER_CREATED);
+    }
 
     /**
      * 第1步解码并校验信封协议；第2步校验 MessageView 的实际 Tag 与信封 eventType 一致；

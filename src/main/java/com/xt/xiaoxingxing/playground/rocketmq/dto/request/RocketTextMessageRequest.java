@@ -1,6 +1,5 @@
 package com.xt.xiaoxingxing.playground.rocketmq.dto.request;
 
-import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -14,8 +13,10 @@ public class RocketTextMessageRequest {
     @Size(max = 500, message = "text最多500个字符")
     private String text;
 
-    /** Tag 只允许保守字符集，避免把 destination 的 {@code topic:tag} 格式拼坏。 */
-    @NotBlank(message = "tag不能为空")
-    @Pattern(regexp = "[A-Za-z0-9_]+", message = "tag只能包含字母、数字或下划线")
-    private String tag = RocketMqNames.TAG_DEMO;
+    /**
+     * Tag 只允许保守字符集，避免破坏消息路由语义。
+     * 请求未传或显式传空字符串时，由 Service 使用 YAML 中的演示 Tag；不再在 DTO 写 Java 默认值。
+     */
+    @Pattern(regexp = "^$|[A-Za-z0-9_]+$", message = "tag只能为空，或包含字母、数字、下划线")
+    private String tag;
 }

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.xxljob.mapper.XxlLearningOrderSummaryMapper">
+
+    <sql id="summaryColumns">
+        summary_date AS summaryDate, run_version AS runVersion, order_count AS orderCount,
+        pending_order_count AS pendingOrderCount, paid_order_count AS paidOrderCount,
+        cancelled_order_count AS cancelledOrderCount, total_amount AS totalAmount,
+        source_start_at AS sourceStartAt, source_end_at AS sourceEndAt,
+        execution_id AS executionId, created_at AS createdAt, updated_at AS updatedAt
+    </sql>
+
+    <!-- PostgreSQL FILTER 让一次扫描同时得到总数和各状态数；半开区间不会在相邻日报重复计算午夜订单。 -->
+    <select id="aggregateOrders" resultType="com.xt.xiaoxingxing.playground.xxljob.entity.XxlLearningOrderSummary">
+        SELECT COUNT(*) AS orderCount,
+               COUNT(*) FILTER (WHERE status = 'PENDING') AS pendingOrderCount,
+               COUNT(*) FILTER (WHERE status = 'PAID') AS paidOrderCount,
+               COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelledOrderCount,
+               COALESCE(SUM(total_amount), 0) AS totalAmount
+        FROM orders
+        WHERE created_at &gt;= #{sourceStartAt} AND created_at &lt; #{sourceEndAt}
+    </select>
+
+    <!-- 相同或更低版本不会进入 DO UPDATE；调用方读取当前行后分别按幂等或“已有更新版本”处理。 -->
+    <insert id="upsertHigherVersion">
+        INSERT INTO xxl_learning_order_summary (
+            summary_date, run_version, order_count, pending_order_count, paid_order_count,
+            cancelled_order_count, total_amount, source_start_at, source_end_at, execution_id,
+            created_at, updated_at
+        ) VALUES (
+            #{summaryDate}, #{runVersion}, #{orderCount}, #{pendingOrderCount}, #{paidOrderCount},
+            #{cancelledOrderCount}, #{totalAmount}, #{sourceStartAt}, #{sourceEndAt}, #{executionId},
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (summary_date) DO UPDATE
+        SET run_version = EXCLUDED.run_version,
+            order_count = EXCLUDED.order_count,
+            pending_order_count = EXCLUDED.pending_order_count,
+            paid_order_count = EXCLUDED.paid_order_count,
+            cancelled_order_count = EXCLUDED.cancelled_order_count,
+            total_amount = EXCLUDED.total_amount,
+            source_start_at = EXCLUDED.source_start_at,
+            source_end_at = EXCLUDED.source_end_at,
+            execution_id = EXCLUDED.execution_id,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE xxl_learning_order_summary.run_version &lt; EXCLUDED.run_version
+    </insert>
+
+    <select id="selectByDate" resultType="com.xt.xiaoxingxing.playground.xxljob.entity.XxlLearningOrderSummary">
+        SELECT <include refid="summaryColumns"/> FROM xxl_learning_order_summary
+        WHERE summary_date = #{summaryDate}
+    </select>
+
+    <sql id="summaryFilters">
+        <where>
+            <if test="dateFrom != null">summary_date &gt;= #{dateFrom}</if>
+            <if test="dateTo != null">AND summary_date &lt;= #{dateTo}</if>
+        </where>
+    </sql>
+
+    <select id="selectPage" resultType="com.xt.xiaoxingxing.playground.xxljob.entity.XxlLearningOrderSummary">
+        SELECT <include refid="summaryColumns"/> FROM xxl_learning_order_summary
+        <include refid="summaryFilters"/>
+        ORDER BY summary_date DESC LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(*) FROM xxl_learning_order_summary <include refid="summaryFilters"/>
+    </select>
+</mapper>
