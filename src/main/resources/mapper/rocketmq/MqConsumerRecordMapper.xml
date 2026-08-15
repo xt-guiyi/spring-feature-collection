@@ -3,8 +3,23 @@
 <mapper namespace="com.xt.xiaoxingxing.playground.rocketmq.mapper.MqConsumerRecordMapper">
 
     <!--
-        RocketMQ 至少一次投递下，同一消息可能并发重试。唯一约束是最终裁决：影响 1 行的调用者获得业务处理权，
-        影响 0 行表示已经成功处理过，应直接按幂等成功返回，不能再次累计或发送通知。
+        超时调度发送前只做短只读检查，不能先插入“已完成”再跨数据库事务调用 RocketMQ：
+        如果完成记录已经提交而 Broker 发送失败，后续重试会错误跳过并永久漏掉超时检查。
+    -->
+    <select id="existsConsumed" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+            FROM mq_consumed_message
+            WHERE consumer_name = #{consumerName}
+              AND message_id = #{messageId}
+        )
+    </select>
+
+    <!--
+        RocketMQ 至少一次投递下，同一消息可能并发重试，唯一约束负责最终防重，但调用顺序取决于副作用：
+        1. 订单统计在同一个 PostgreSQL 事务中先执行本 INSERT；返回 1 才继续 UPSERT，返回 0 直接结束，避免重复累计；
+        2. 缓存删除无法与 PostgreSQL 同事务，调用方先检查幂等记录、事务外删除 Redis，再执行本 INSERT 登记完成。
+           并发路径都删除相同 Key 是安全的；本 INSERT 返回 0 只表示另一条路径已经先登记完成。
     -->
     <insert id="insertConsumedIfAbsent"
             parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage">
@@ -23,7 +38,7 @@
         否则重复消息仍会使计数增加。
     -->
     <insert id="upsertStatistics">
-        INSERT INTO mq_order_statistics (
+        INSERT INTO order_statistics (
             id, created_count, paid_count, cancelled_count,
             created_amount, last_event_at, updated_at
         ) VALUES (
@@ -36,86 +51,15 @@
             CURRENT_TIMESTAMP
         )
         ON CONFLICT (id) DO UPDATE SET
-            created_count = mq_order_statistics.created_count + EXCLUDED.created_count,
-            paid_count = mq_order_statistics.paid_count + EXCLUDED.paid_count,
-            cancelled_count = mq_order_statistics.cancelled_count + EXCLUDED.cancelled_count,
-            created_amount = mq_order_statistics.created_amount + EXCLUDED.created_amount,
+            created_count = order_statistics.created_count + EXCLUDED.created_count,
+            paid_count = order_statistics.paid_count + EXCLUDED.paid_count,
+            cancelled_count = order_statistics.cancelled_count + EXCLUDED.cancelled_count,
+            created_amount = order_statistics.created_amount + EXCLUDED.created_amount,
             last_event_at = CASE
-                WHEN mq_order_statistics.last_event_at IS NULL THEN EXCLUDED.last_event_at
-                ELSE GREATEST(mq_order_statistics.last_event_at, EXCLUDED.last_event_at)
+                WHEN order_statistics.last_event_at IS NULL THEN EXCLUDED.last_event_at
+                ELSE GREATEST(order_statistics.last_event_at, EXCLUDED.last_event_at)
             END,
             updated_at = CURRENT_TIMESTAMP
     </insert>
-
-    <!--
-        相同消息和渠道违反唯一键时影响 0 行。正常重投会先被 mq_consumed_message 挡住；若本组已成功领取
-        幂等键却仍冲突，Service 将其视为本地数据一致性异常并回滚，避免掩盖绕过正常链路的写入。
-    -->
-    <insert id="insertNotification"
-            parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqNotificationLog">
-        INSERT INTO mq_notification_log (
-            message_id, order_id, event_type, channel, status, content, created_at
-        ) VALUES (
-            #{messageId}, #{orderId}, #{eventType}, #{channel}, #{status}, #{content},
-            COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
-        )
-        ON CONFLICT (message_id, channel) DO NOTHING
-    </insert>
-
-    <select id="selectConsumedPage"
-            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage">
-        SELECT id,
-               consumer_name AS consumerName,
-               message_id AS messageId,
-               event_type AS eventType,
-               aggregate_id AS aggregateId,
-               consumed_at AS consumedAt
-        FROM mq_consumed_message
-        <where>
-            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
-        </where>
-        ORDER BY consumed_at DESC, id DESC
-        LIMIT #{pageSize} OFFSET #{offset}
-    </select>
-
-    <select id="countConsumed" resultType="long">
-        SELECT COUNT(*)
-        FROM mq_consumed_message
-        <where>
-            <if test="consumerName != null and consumerName != ''">consumer_name = #{consumerName}</if>
-        </where>
-    </select>
-
-    <select id="selectStatistics"
-            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqOrderStatistics">
-        SELECT id,
-               created_count AS createdCount,
-               paid_count AS paidCount,
-               cancelled_count AS cancelledCount,
-               created_amount AS createdAmount,
-               last_event_at AS lastEventAt,
-               updated_at AS updatedAt
-        FROM mq_order_statistics
-        WHERE id = 1
-    </select>
-
-    <select id="selectNotificationPage"
-            resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqNotificationLog">
-        SELECT id,
-               message_id AS messageId,
-               order_id AS orderId,
-               event_type AS eventType,
-               channel,
-               status,
-               content,
-               created_at AS createdAt
-        FROM mq_notification_log
-        ORDER BY created_at DESC, id DESC
-        LIMIT #{pageSize} OFFSET #{offset}
-    </select>
-
-    <select id="countNotifications" resultType="long">
-        SELECT COUNT(*) FROM mq_notification_log
-    </select>
 
 </mapper>

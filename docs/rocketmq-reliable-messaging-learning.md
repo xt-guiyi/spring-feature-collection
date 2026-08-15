@@ -1,562 +1,445 @@
-# RocketMQ 5.x 可靠消息学习指南
+# RocketMQ 可靠订单消息学习案例
 
-这套案例的重点不是“成功发送一条字符串”，而是理解业务系统真正会遇到的五类问题：
+## 1. 先明确这个案例要解决什么
 
-1. 数据库提交成功，但消息没发出去；
-2. Broker 已接收消息，但生产者没有拿到明确结果；
-3. 消费者处理失败，需要重试或进入死信队列；
-4. 同一条消息被投递多次，业务副作用不能重复执行；
-5. 同一业务对象的消息乱序到达，旧消息不能覆盖新状态。
+用户下单同时包含两类事实：
 
-项目提供两套独立的“数据库 + 消息”可靠写入入口：
+1. PostgreSQL 订单、订单明细和库存，这是权威业务事实；
+2. RocketMQ 订单事件，用来驱动缓存失效、统计投影和付款超时取消。
 
-- Transactional Outbox：先在同一个 PostgreSQL 事务中写业务数据和本地消息表，再由定时任务可靠发布；
-- RocketMQ 事务消息：先持久化 PREPARED 回查锚点并发送半消息，再执行本地事务，
-  最后提交或回滚半消息；半消息状态不明时由 Broker 回查，未到达 Broker 的记录由主动清理收口。
+困难不在于“会调用发送 API”，而在于数据库和 Broker 不能参加同一个普通本地事务：
 
-同一笔订单只选一种方案，不要同时使用两套机制，否则会产生两条语义相同的事件。
+- 数据库提交后应用崩溃，消息可能没有发送；
+- 消息已发送但回包丢失，应用可能重复发送；
+- 消费者完成业务后、确认消息前崩溃，同一消息会再次投递。
 
-## 1. 先认识五个运行组件
+本 Playground 用同一套订单业务并排演示两种解决方案：
 
-| 组件         | 本地地址                     | 主要职责                                   | 不负责什么                     |
-| ---------- | ------------------------ | -------------------------------------- | ------------------------- |
-| NameServer | `localhost:9876`         | 保存 Topic 到 Broker 的路由信息                | 不保存业务消息                   |
-| Broker     | `10909/10911/10912`      | 持久化消息、维护消费进度、重试和死信                     | 不提供本项目 Java 5.x gRPC 接入地址 |
-| Proxy      | `localhost:18081`        | 接收 RocketMQ 5.x gRPC 客户端请求并访问 Broker   | 不替代 Broker 持久化消息          |
-| Dashboard  | `http://localhost:18082` | 查看 Topic、消息、ConsumerGroup 和消费进度        | 不参与消息可靠传输                 |
-| Init       | 一次性容器                    | 等 Broker 注册后创建四种 Topic 和 ConsumerGroup | 完成初始化后不常驻                 |
+- Transactional Outbox：订单事实和消息意图先在同一个 PostgreSQL 事务落库，再由 `OutboxRelay` 可靠发布；
+- RocketMQ 事务消息：Broker 先保存不可见半消息，本地事务完成后提交半消息，并由事务回查收敛不确定结果。
 
-Java 配置中的 `ROCKETMQ_ENDPOINTS` 应填写 Proxy 的 `localhost:18081`，不是 NameServer 的 `9876`。
+> 学习项目同时保留两套入口是为了逐步骤对照。真实生产系统的同一项订单业务应选择其中一种，不要同时写 Outbox 又发送事务消息，否则会得到两份语义相同的事件。
 
-当前 Compose 是单 NameServer、单 Broker 的学习环境，没有副本切换能力，不能照搬到生产环境。生产环境还需评估多副本、磁盘、刷盘策略、监控、告警、鉴权和容量规划。
+两种机制都只提供至少一次效果，消费者幂等仍然是必需的。代码没有宣传“端到端恰好一次”。
 
-## 2. 启动顺序
+## 2. 五个业务 HTTP 入口
 
-### 2.1 启动 RocketMQ
+### 2.1 查询商品并观察 Cache Aside
 
-先进入本项目同级的 Docker 目录执行（本文后续命令继续以这个目录为当前位置）：
-
-```bash
-cd ../docker
-docker compose up -d rocketmq-nameserver rocketmq-broker rocketmq-proxy rocketmq-dashboard
-docker compose run --rm rocketmq-init
+```http
+GET /api/playground/rocketmq/products/{productId}
 ```
 
-初始化任务创建以下 Topic：
+第一次查询通常从 PostgreSQL 读取并回填 Redis，随后查询可命中 Redis。响应中的 `cacheHit` 只表示本次数据来源；库存扣减的最终裁决始终在 PostgreSQL。
 
-| Topic                     | 类型          | 用途                    |
-| ------------------------- | ----------- | --------------------- |
-| `pg_learning_normal`      | NORMAL      | 普通、异步、Tag、重试、订单业务事件   |
-| `pg_learning_fifo`        | FIFO        | 按 MessageGroup 保证局部顺序 |
-| `pg_learning_delay`       | DELAY       | 任意延迟和订单超时检查           |
-| `pg_learning_transaction` | TRANSACTION | RocketMQ 事务半消息        |
+### 2.2 Outbox 创建、支付订单
 
-本 Compose 固定使用 RocketMQ 5.5.0，该版本 Proxy 默认开启 Topic 消息类型校验。向 FIFO Topic 发送普通消息、
-向 NORMAL Topic 发送事务消息会被拒绝，因此本案例明确拆成四个 Topic。这个校验发生在 Proxy，不能通过给
-Broker 随意添加一个同名参数来开启或关闭。
-
-### 2.2 初始化 PostgreSQL
-
-Compose 中原有 PostgreSQL 服务的 `POSTGRES_DB` 是 `test_db`，但本项目的数据源连接 `demo`。
-官方 PostgreSQL 镜像只会在首次创建数据卷时自动创建一个 `POSTGRES_DB`，所以不能假设已有卷里一定存在
-`demo`。先执行一次幂等初始化任务：数据库已经存在时它只会跳过，不会删除或覆盖数据。
-
-```bash
-docker compose up -d postgres
-docker compose run --rm postgres-demo-init
+```http
+POST /api/playground/rocketmq/outbox/orders
+POST /api/playground/rocketmq/outbox/orders/{orderId}/pay
 ```
 
-然后仍在 `backend/docker` 目录，把项目中的 SQL 通过标准输入交给 PostgreSQL 容器。这里显式使用
-`../spring-feature-collection/...`，避免在 Docker 目录直接写 `docs/...` 导致找不到文件：
+### 2.3 事务消息创建、支付订单
 
-```bash
-# 首次学习可先创建 users、products、orders 等基础表和示例数据。
-# 注意：schema-demo.sql 是重建型学习脚本，会 DROP 并重建相关表；已有重要数据时不要执行这一行。
-docker exec -i local-postgres psql -U root -d demo \
-  < ../spring-feature-collection/docs/schema-demo.sql
-
-# RocketMQ 脚本只重建 5 张 mq_* 学习表，不会删除 users、products、orders 等基础业务表。
-# 它不是增量迁移脚本，重复执行会清空已有的 RocketMQ 学习记录。
-docker exec -i local-postgres psql -U root -d demo \
-  < ../spring-feature-collection/docs/rocketmq-reliable-messaging-schema.sql
+```http
+POST /api/playground/rocketmq/transaction/orders
+POST /api/playground/rocketmq/transaction/orders/{orderId}/pay
 ```
 
-### 2.3 启动应用前检查
-
-- PostgreSQL `demo` 库已有 `users/products/orders/order_products`；
-- 至少有一个状态为 `ACTIVE` 的用户；
-- 商品有足够库存；
-- Proxy 地址是 `localhost:18081`；
-- Init 容器已成功创建 Topic 和 ConsumerGroup。
-
-本次代码交付不代替你启动环境，也不会自动执行 SQL。
-
-依赖兼容性边界：本案例使用 Apache RocketMQ 官方
-`rocketmq-v5-client-spring-boot-starter:2.3.6`，其源码中的 Spring Boot/Spring 构建基线是
-`2.7.18/5.3.27`，而当前项目是 Spring Boot `4.1.0`。本次只核对了所调用的官方 API 和自动配置入口，
-按约定没有执行 Maven 构建或启动，因此不能声称两者已经通过运行时兼容验证。若启动时出现确定的 Spring 二进制
-兼容问题，应优先替换集中在 `RocketMessagePublisher`、监听器和配置层的适配代码，不需要推翻 Outbox、幂等和状态机。
-
-## 3. 六个核心概念
-
-### 3.1 Topic
-
-Topic 是消息的大分类，例如订单事件统一进入 `pg_learning_normal`。Topic 不应该细化成“每个订单一个 Topic”。
-
-### 3.2 MessageQueue
-
-一个 Topic 可以有多个 MessageQueue，它们是 Broker 并行存储和消费的分片。队列越多通常并行度越高，但顺序范围也被限制在选定的队列/MessageGroup 内。
-
-### 3.3 Tag
-
-Tag 是 Topic 内的二级分类。本项目使用：
-
-- `DEMO`
-- `RETRY_DEMO`
-- `ORDER_CREATED`
-- `ORDER_PAID`
-- `ORDER_CANCELLED`
-- `ORDER_PAYMENT_TIMEOUT_CHECK`
-
-消费者可通过 Tag 表达式只订阅自己关心的事件，避免收到后再由 Java 大量丢弃。但 Tag 过滤只证明
-Broker 路由命中，不能证明 JSON 信封的 `eventType` 与 Tag 相符。`RocketConsumerSupport` 在调用业务 handler 前
-还会校验以下显式契约：
-
-| 监听器用途              | 实际 Tag                        | 允许的 envelope.eventType        |
-| ------------------ | ----------------------------- | ----------------------------- |
-| 普通/FIFO/延迟/多组 Demo | `DEMO`                        | `DEMO_MESSAGE`                |
-| 重试 Demo            | `RETRY_DEMO`                  | `DEMO_MESSAGE`                |
-| 普通订单事件             | `ORDER_CREATED`               | `ORDER_CREATED`               |
-| 普通订单事件             | `ORDER_PAID`                  | `ORDER_PAID`                  |
-| 普通订单事件             | `ORDER_CANCELLED`             | `ORDER_CANCELLED`             |
-| 订单超时检查             | `ORDER_PAYMENT_TIMEOUT_CHECK` | `ORDER_PAYMENT_TIMEOUT_CHECK` |
-| 事务半消息              | `ORDER_CREATED`               | `TRANSACTION_ORDER_CREATED`   |
-
-事务 Topic 虽然复用 `ORDER_CREATED` Tag，但它的信封事件是独立的
-`TRANSACTION_ORDER_CREATED`，不能与普通 Topic 的创建事件混用。缺失 Tag、Tag 不在允许表中或
-eventType 不匹配时，公共模板抛出协议异常，在任何通知、统计、缓存或取消订单副作用前返回
-`FAILURE`；Broker 有限重试后转入 DLQ 保留错误消息，不会将它当成消费成功静默 ACK。
-
-### 3.4 Key
-
-Key 用于按业务标识检索消息。本项目会使用稳定的订单号、businessKey 或业务消息 ID；同一个 Outbox 重试时 Key
-必须保持不变。Key 不是数据库唯一约束，也不自动提供消费者幂等，幂等仍由 `mq_consumed_message` 的唯一键保证。
-
-### 3.5 ConsumerGroup
-
-- 同一个 ConsumerGroup 内的多个实例共同分担消息；
-- 不同 ConsumerGroup 各自维护消费进度，因此每组都能收到一份消息；
-- 修改 ConsumerGroup 名称相当于创建新的消费身份和新的消费进度，不能随意改名。
-
-订单创建事件会被缓存、统计、通知三个不同组各消费一次。这就是不同 ConsumerGroup 各自维护消费进度形成的发布订阅效果。
-
-### 3.6 MessageGroup
-
-FIFO 消息使用 MessageGroup 选择有序范围。例如同一订单号作为 MessageGroup，可保证该订单的 `创建 -> 支付 -> 发货` 顺序；不同订单可以并行处理。
-
-RocketMQ 保证的是同一 MessageGroup 内的顺序，不是整个 Topic 的全局顺序。
-
-## 4. 消息协议为什么还要有 envelope
-
-消息体统一使用以下结构：
+创建请求示例：
 
 ```json
 {
-  "messageId": "业务消息UUID",
-  "eventType": "ORDER_CREATED",
-  "schemaVersion": 1,
-  "aggregateId": "10001",
-  "occurredAt": "2026-08-12T10:00:00",
-  "payload": {}
-}
-```
-
-- `messageId`：消费者幂等键，不能在每次重试时重新生成；
-- `eventType`：表示发生了什么，而不是让消费者执行任意命令；
-- `schemaVersion`：消息结构升级时选择正确解析逻辑；
-- `aggregateId`：订单事件使用 orderId，事务消息使用 transactionId 等业务聚合标识；
-- `occurredAt`：判断延迟和乱序的业务时间；
-- `payload`：当前版本需要的业务快照。
-
-Broker 的 MessageId 与业务 `messageId` 含义不同：前者由 Broker/客户端生成，用于追踪投递；后者由业务生成，用于跨重试、Outbox 和消费幂等。
-
-## 5. 基础消息案例
-
-统一前缀：
-
-```text
-/api/playground/rocketmq/demo
-```
-
-### 5.1 同步普通消息
-
-```http
-POST /api/playground/rocketmq/demo/normal
-Content-Type: application/json
-
-{
-  "text": "第一条 RocketMQ 普通消息",
-  "tag": "DEMO"
-}
-```
-
-HTTP 返回业务消息 ID、Broker MessageId、Topic、Tag 和 Key。同步成功表示发送调用拿到了 Broker 回执，但消费者业务仍可能尚未执行。
-
-观察：
-
-- 应用日志中的发送回执；
-- `NormalTagConsumer` 消费日志；
-- Dashboard 的 Topic 消息查询。
-
-### 5.2 异步普通消息
-
-```http
-POST /api/playground/rocketmq/demo/async
-Content-Type: application/json
-
-{
-  "text": "异步发送不会等待 Broker 回执后再返回 HTTP",
-  "tag": "DEMO"
-}
-```
-
-HTTP 中的 `accepted=true` 只表示应用已接受异步任务，不等于 Broker 已接受消息。最终结果要看异步回调日志和 Dashboard。
-
-### 5.3 Tag 与不同消费组
-
-把消息发送到 NORMAL Topic 后，观察不同 ConsumerGroup：
-
-- Tag 不匹配的消费者不会收到；
-- 审计组和通知组使用不同 ConsumerGroup，因此都能收到同一条消息；
-- 同组启动两个应用实例时，消息只由其中一个实例处理。
-
-### 5.4 FIFO 顺序消息
-
-```http
-POST /api/playground/rocketmq/demo/fifo
-Content-Type: application/json
-
-{
-  "businessKey": "ORDER-DEMO-001",
-  "count": 5
-}
-```
-
-服务会用同一个 `businessKey` 作为 MessageGroup，依次发送序号 `1..5`。再用另一个 businessKey 调用一次，可以观察两个组之间并行、每个组内部有序。
-
-### 5.5 延迟消息
-
-```http
-POST /api/playground/rocketmq/demo/delay
-Content-Type: application/json
-
-{
-  "text": "10秒后才能消费",
-  "delaySeconds": 10
-}
-```
-
-消费者日志会记录期望投递时间、实际接收时间和偏差。延迟投递不是精准定时器，Broker 调度、网络和消费者负载都会带来偏差。
-
-### 5.6 消费重试和死信
-
-```http
-POST /api/playground/rocketmq/demo/retry
-Content-Type: application/json
-
-{
-  "text": "前两次故意失败，第三次成功",
-  "failTimes": 2
-}
-```
-
-消费者读取 `MessageView.getDeliveryAttempt()`：在指定次数内返回 `FAILURE`，之后返回 `SUCCESS`。Java 代码不会自己复制一条“重试消息”，重投由 Broker 负责。
-
-若 `failTimes` 大于 ConsumerGroup 配置的最大重试次数，消息最终进入：
-
-```text
-%DLQ%pg_learning_retry_demo_group_v1
-```
-
-死信不是“自动处理完成”。生产环境需要告警、人工诊断、修复原因和受控重放，不能无限自动重放毒消息。
-
-### 5.7 应用层批量发送
-
-```http
-POST /api/playground/rocketmq/demo/batch
-Content-Type: application/json
-
-{
-  "items": [
-    {"text": "batch-1", "tag": "DEMO"},
-    {"text": "batch-2", "tag": "DEMO"}
-  ]
-}
-```
-
-本接口只是把一次 HTTP 请求拆成多条独立消息并分别返回结果，不宣称底层一定合并成一个 Broker 批量传输帧。部分成功时要逐条查看结果。
-
-## 6. Transactional Outbox 订单案例
-
-### 6.1 创建订单
-
-```http
-POST /api/playground/rocketmq/orders/outbox
-Content-Type: application/json
-
-{
   "userId": 1,
-  "orderNo": "RMQ-OUTBOX-001",
+  "orderNo": "ROCKET-LEARN-20260815-001",
   "items": [
-    {"productId": 1, "quantity": 1},
-    {"productId": 2, "quantity": 2}
+    { "productId": 1, "quantity": 2 },
+    { "productId": 2, "quantity": 1 }
   ]
 }
 ```
 
-同一个 PostgreSQL 本地事务完成：
+两套创建、支付入口统一返回 `Result<OrderResponse>`。核心 `data` 形状如下：
 
-```text
-创建订单 + 扣库存
-        + 写 ORDER_CREATED Outbox
-        + 写 ORDER_PAYMENT_TIMEOUT_CHECK Outbox
+```json
+{
+  "orderId": 101,
+  "orderNo": "ROCKET-LEARN-20260815-001",
+  "status": "PENDING",
+  "totalAmount": 239.70,
+  "itemCount": 3
+}
 ```
 
-这里没有 PostgreSQL 与 RocketMQ 的分布式事务。HTTP 返回时消息可能还在 `PENDING` 状态，定时发布器随后使用 `FOR UPDATE SKIP LOCKED` 抢占任务并发布。
+支付成功时 `status` 为 `PAID`。响应只包含订单 ID、订单号、状态、金额和商品总件数；消息身份与事务裁决状态都是内部可靠性实现，不应污染订单 API。
 
-### 6.2 应观察的数据库状态
+没有手工“取消订单”HTTP 接口。两套方案都由付款超时消息触发取消，取消时再次检查订单是否仍为 `PENDING`。
+
+## 3. 最终代码导航
+
+### 3.1 共同契约与基础设施
+
+- `rocketmq/message/RocketMessageEnvelope.java`：版本化消息信封；
+- `rocketmq/message/OrderEventPayload.java`：已发生订单事实的事件负载；
+- `rocketmq/message/OrderTransactionCommands.java`：事务半消息执行本地操作所需的最小命令；
+- `rocketmq/support/RocketMessageCodec.java`：编码、解码和协议校验；
+- `rocketmq/support/RocketMessagePublisher.java`：同步 NORMAL、DELAY、TRANSACTION 发布；
+- `rocketmq/support/RocketConsumerSupport.java`：统一解码、取得真实 Tag、调用业务处理器并返回消费结果；
+- `rocketmq/order/OrderResponse.java`：两套入口共用的订单响应；
+- `rocketmq/order/OrderEventHandler.java`：缓存失效与统计投影；
+- `rocketmq/product/ProductController.java`、`ProductService.java`：Cache Aside 商品查询。
+
+### 3.2 Outbox 链路
+
+- `rocketmq/order/outbox/OrderController.java`；
+- `rocketmq/order/outbox/OrderService.java`；
+- `rocketmq/infrastructure/OutboxRelay.java`；
+- `rocketmq/order/outbox/listener/ProductCacheInvalidationListener.java`；
+- `rocketmq/order/outbox/listener/OrderStatisticsListener.java`；
+- `rocketmq/order/outbox/listener/PaymentTimeoutListener.java`。
+
+### 3.3 事务消息链路
+
+- `rocketmq/order/transaction/OrderController.java`；
+- `rocketmq/order/transaction/OrderService.java`；
+- `rocketmq/infrastructure/TransactionRecordRepository.java`；
+- `rocketmq/infrastructure/OrderTransactionChecker.java`；
+- `rocketmq/infrastructure/PreparedTransactionCleanupTask.java`；
+- `rocketmq/order/transaction/listener/ProductCacheInvalidationListener.java`；
+- `rocketmq/order/transaction/listener/OrderStatisticsListener.java`；
+- `rocketmq/order/transaction/listener/PaymentTimeoutScheduleListener.java`；
+- `rocketmq/order/transaction/listener/PaymentTimeoutListener.java`。
+
+两个包里存在同名 Listener，但显式 Spring Bean 名不同，不会发生 Bean 名冲突。
+
+## 4. Topic、Tag 和 ConsumerGroup 的真实关系
+
+Topic 是消息的大类，Tag 是 Topic 内的二级业务过滤条件，ConsumerGroup 表示一项独立消费职责。同组多实例竞争消费，不同组各得到一份消息。
+
+### 4.1 三个 Topic
+
+| 配置键 | 固定值 | 用途 |
+|---|---|---|
+| `topics.normal` | `pg_order_events` | Outbox 创建、支付、取消事实事件 |
+| `topics.delay` | `pg_order_timeouts` | 两套方案的付款超时检查 |
+| `topics.transaction` | `pg_order_transactions` | 事务消息 CREATE、PAY、CANCEL 半消息 |
+
+### 4.2 五个 Tag
+
+| 固定值 | 业务含义 |
+|---|---|
+| `ORDER_CREATED` | 订单已创建且库存已扣减 |
+| `ORDER_PAID` | 订单已支付 |
+| `ORDER_CANCELLED` | 订单已取消且库存已恢复 |
+| `OUTBOX_PAYMENT_TIMEOUT_CHECK` | Outbox 订单付款超时检查 |
+| `TRANSACTION_PAYMENT_TIMEOUT_CHECK` | 事务消息订单付款超时检查 |
+
+### 4.3 七个消费组和七个 Listener
+
+| ConsumerGroup 固定值 | 监听 Topic / Tag | Listener | 真实副作用 |
+|---|---|---|---|
+| `pg_outbox_order_cache_group_v1` | normal / CREATED、CANCELLED | outbox `ProductCacheInvalidationListener` | 删除变更库存商品的 Redis 缓存 |
+| `pg_outbox_order_statistics_group_v1` | normal / CREATED、PAID、CANCELLED | outbox `OrderStatisticsListener` | 更新订单统计 |
+| `pg_outbox_order_timeout_group_v1` | delay / OUTBOX timeout | outbox `PaymentTimeoutListener` | 超时后尝试取消 Outbox 订单 |
+| `pg_transaction_order_cache_group_v1` | transaction / CREATED、CANCELLED | transaction `ProductCacheInvalidationListener` | 从数据库恢复已提交事实后删除缓存 |
+| `pg_transaction_order_statistics_group_v1` | transaction / CREATED、PAID、CANCELLED | transaction `OrderStatisticsListener` | 从数据库恢复已提交事实后更新统计 |
+| `pg_transaction_timeout_scheduler_group_v1` | transaction / CREATED | transaction `PaymentTimeoutScheduleListener` | 安排事务订单延迟检查 |
+| `pg_transaction_order_timeout_group_v1` | delay / TRANSACTION timeout | transaction `PaymentTimeoutListener` | 超时后尝试事务取消 |
+
+缓存组不订阅 `ORDER_PAID`，因为支付不改变商品库存。统计组需要订阅三种订单事实。
+
+## 5. Outbox：先落消息意图，再可靠发布
+
+### 5.1 创建订单
+
+`order.outbox.OrderService#createOrder` 在同一个 PostgreSQL 本地事务中完成：
+
+1. 校验用户、商品和数量；
+2. 创建 `PENDING` 订单与明细；
+3. 使用带 `stock >= quantity` 条件的 SQL 扣减库存；
+4. 插入 `ORDER_CREATED` Outbox 事件；
+5. 插入 `OUTBOX_PAYMENT_TIMEOUT_CHECK` Outbox 事件，保存未来 `deliverAt`；
+6. 一起提交，任何一步失败全部回滚。
+
+这里不存在“订单提交成功但消息意图没有保存”的窗口。
+
+### 5.2 OutboxRelay 的三个短窗口
+
+`OutboxRelay#publishPendingEvents` 每轮按以下顺序工作：
+
+1. 短事务用 `FOR UPDATE SKIP LOCKED` 原子领取 `PENDING/FAILED` 或租约过期的 `PROCESSING`；
+2. 提交领取事务，释放数据库连接和行锁；
+3. 在数据库事务外同步调用 RocketMQ；普通事件发 NORMAL，超时事件按 `deliverAt` 计算 DELAY；
+4. Broker 明确成功后，用 `id + lockedAt` 在新短事务标记 `PUBLISHED`；
+5. 失败则在新短事务递增重试次数、指数退避，超过上限转为 `DEAD`。
+
+若 Broker 已接收，但进程在回写 `PUBLISHED` 前崩溃，租约过期后会再次发布。同一 Outbox `id` 同时也是信封中的稳定 `messageId`，消费者用它幂等。
+
+### 5.3 支付和超时取消
+
+- `OrderService#payOrder` 只允许 `PENDING -> PAID`，状态更新与 `ORDER_PAID` Outbox 事件同事务；
+- `PaymentTimeoutListener` 收到延迟检查后调用 `OrderService#cancelExpiredOrder`；
+- 取消只允许 `PENDING -> CANCELLED`，并在同一事务恢复库存、写 `ORDER_CANCELLED` Outbox 事件；
+- 支付与取消同时到达时，条件 UPDATE 的受影响行数决定唯一赢家，不依赖先查到的旧状态。
+
+## 6. RocketMQ 事务消息：半消息协调本地事务
+
+### 6.1 唯一身份和真实聚合键
+
+每次 CREATE、PAY、CANCEL 只生成一个 UUID，并满足：
+
+```text
+transactionId = mq_transaction_record.transaction_id = envelope.messageId
+```
+
+`aggregateId` 不承担事务记录主键职责，只表达稳定业务聚合。事务记录用通用字段描述业务对象：
+
+```text
+businessType = ORDER
+businessKey = orderNo
+aggregateId = businessKey = orderNo
+```
+
+因此当前订单业务的 CREATE、PAY、CANCEL 都使用同一个 `orderNo` 作为聚合键。支付和取消的 HTTP
+入口虽然接收本地 `orderId`，但 Service 会先重读订单取得 `orderNo`，再准备事务记录和构造消息；本地数据库
+主键不能替代跨系统稳定业务键。
+
+`mq_transaction_record` 不复制第二份消息 UUID，也不依赖自定义 Header。Broker Checker 解码信封后，直接用
+`envelope.messageId` 查询事务记录，再校验 `businessType/businessKey` 与信封聚合键。
+
+### 6.2 CREATE、PAY、CANCEL 的共同执行模板
+
+`order.transaction.OrderService#executeTransaction` 的关键顺序是：
+
+1. `TransactionRecordRepository` 用 `REQUIRES_NEW` 独立提交 `PREPARED`；
+2. 在 PostgreSQL 事务外调用 `RocketMessagePublisher#beginTransaction`，让 Broker 保存不可见半消息；
+3. `TransactionTemplate` 只包业务 SQL和 `PREPARED -> COMMITTED` 条件更新；
+4. `markCommitted` 使用 `MANDATORY`，所以订单/库存事实和 `COMMITTED` 必须同事务提交或回滚；
+5. 退出数据库事务后调用半消息 `commit()`。
+
+CREATE 本地事务创建订单、明细并扣库存；PAY 条件更新为 `PAID`；CANCEL 条件更新为 `CANCELLED` 并只恢复一次库存。
+
+如果本地代码抛异常，Service 不能看到 Java 异常就盲目回滚半消息。它先重读事务记录：
+
+- `COMMITTED`：数据库事实已经成功，提交半消息并从数据库恢复 `OrderResponse`；
+- `ROLLED_BACK`：回滚半消息；
+- `PREPARED`：只有条件抢到 `ROLLED_BACK` 后才回滚半消息；
+- 状态查询也不明确：不猜测终态，保留给 Broker 回查。
+
+数据库已经提交后，即使 `commit()` RPC 超时或连接断开，HTTP 仍返回真实 `OrderResponse`。因为订单不能反向回滚，Broker 将通过 Checker 再次确认 `COMMITTED`。
+
+### 6.3 Broker 回查和 PREPARED 孤儿
+
+`OrderTransactionChecker#check`：
+
+1. 校验信封并以 `envelope.messageId` 查询事务记录；
+2. 同时校验 `businessType=ORDER`、`businessKey`、`operationType`、`eventType`，并确认
+   `aggregateId = businessKey`；
+3. `COMMITTED` 返回 COMMIT，`ROLLED_BACK` 返回 ROLLBACK；
+4. 保护窗口内 `PREPARED` 返回 UNKNOWN；
+5. 超时 `PREPARED` 先条件抢占 `ROLLED_BACK`；更新 0 行必须重读并尊重并发赢家。
+
+还有一个 Broker 无法主动发现的窗口：数据库已经提交 `PREPARED`，但进程在半消息到达 Broker 前崩溃。`PreparedTransactionCleanupTask` 只扫描超过保护窗口的孤儿候选，并逐条用相同条件终态更新收口；它不能覆盖已经提交的订单事实。
+
+### 6.4 事务版超时调度为什么拆成三个阶段
+
+`PaymentTimeoutScheduleListener` 收到已提交 CREATE 消息后调用
+`OrderService#schedulePaymentTimeout(orderNo, createdMessageId)`：
+
+1. 短只读事务：检查该 CREATE 消息是否已完成调度、校验 `COMMITTED` 记录与订单事实，并构造计划；
+2. 事务外：用由 `createdMessageId` 确定性派生的稳定 timeout messageId 同步发送 DELAY；
+3. 短写事务：只有 Broker 明确成功后才写调度消费完成记录。
+
+不能先写“已调度”再发送，否则发送失败后重投会被完成记录挡住，消息将永久漏发。若发送成功但完成记录提交或回包不明确，后续会用同一个稳定 timeout messageId 重发；这是“允许重复，不能漏发”。延迟消费者与 CANCEL 条件更新负责最终幂等。
+
+延迟消息到期后，`PaymentTimeoutListener` 会同时提取 `orderNo + orderId`。事务版 `OrderService` 按
+`orderNo` 重读权威订单，再确认数据库主键等于消息中的 `orderId`；两者不是同一订单时直接失败，不能修改任何订单。
+
+事务半消息中的 CREATE/PAY/CANCEL 正文是执行本地操作的命令，不是可直接相信的订单事实。事务版缓存、统计
+Listener 会先确认事务记录为 `COMMITTED`，校验 `businessType=ORDER`、`aggregateId=businessKey` 和操作类型，
+再用 `businessKey/orderNo` 从 PostgreSQL 重读订单及明细，组装真实 `OrderEventPayload`。
+
+## 7. 消费幂等与两个真实副作用
+
+### 7.1 `mq_consumed_message.message_id` 为什么必须保留
+
+`mq_transaction_record` 删除重复的消息 ID 列，不代表消费表也删除。`mq_consumed_message.message_id` 是每个消费组的幂等键，唯一约束为：
+
+```text
+(consumer_name, message_id)
+```
+
+同一条订单消息可以由缓存组和统计组各处理一次；同组重复投递只能首次产生副作用。
+
+### 7.2 缓存失效：先查、Redis delete、短写幂等
+
+`OrderEventHandler#invalidateProductCache` 的顺序是：
+
+1. 短只读事务检查幂等记录；
+2. 退出数据库事务后删除 Redis Key；
+3. 删除成功后，用短事务插入消费完成记录。
+
+Redis 与 PostgreSQL 没有共同本地事务，不能先写完成记录再删缓存。当前顺序若在 delete 后崩溃，Broker 重投只会再次 delete，天然安全。
+
+这里使用的是 Cache Aside：查询时先读 Redis，未命中再读 PostgreSQL 并回填；库存变化后通过事件删除缓存。它存在一个可接受但必须知道的并发边界：
+
+```text
+查询线程读到旧数据库快照
+→ 订单事务更新库存并删除缓存
+→ 查询线程在删除之后把旧快照回填 Redis
+```
+
+这会造成 TTL 时间内的短暂陈旧。因此缓存不能裁决是否可以扣库存，真正下单必须依赖 PostgreSQL 条件 UPDATE。若业务要求更强一致性，可叠加版本号、延迟双删或 CDC 等方案，但复杂度会更高。
+
+### 7.3 统计投影：幂等记录与 UPSERT 同事务
+
+`OrderEventHandler#recordStatistics` 在同一个 PostgreSQL 短事务内：
+
+1. `INSERT ... ON CONFLICT DO NOTHING` 竞争幂等键；
+2. 插入 0 行表示已经处理，直接结束；
+3. 插入 1 行才 UPSERT `order_statistics`；
+4. 统计失败时幂等记录一起回滚，使 Broker 重投仍可重新处理。
+
+## 8. 三张 MQ 基础设施表与订单统计投影分别负责什么
+
+| 表 | 职责 |
+|---|---|
+| `mq_outbox_event` | Outbox 消息意图、租约、重试和最终发布状态 |
+| `mq_consumed_message` | 各消费组的消息幂等记录，也记录事务超时调度完成 |
+| `order_statistics` | 由消息消费驱动的创建、支付、取消事件订单统计投影 |
+| `mq_transaction_record` | 事务半消息的持久裁决依据 |
+
+`mq_transaction_record` 最终只包含 8 个字段：
+
+```text
+transaction_id, business_type, business_key, operation_type,
+status, last_error, created_at, updated_at
+```
+
+数据库约束表达以下不变量：
+
+- `business_type` 和 `business_key` 是基础设施可复用的通用业务身份，不在事务表中增加订单专用列；
+- 当前订单链固定 `business_type=ORDER`，CREATE/PAY/CANCEL 的 `business_key` 都是 `orderNo`；
+- 同一个订单的不同操作由 `operation_type` 区分；
+- 活跃记录按 `(business_type, business_key, operation_type)` 唯一；
+- 只有 `PREPARED/COMMITTED` 占用活跃唯一键，`ROLLED_BACK` 保留审计但允许新 UUID 重试。
+
+这些表均不定义数据库外键。订单、消息、消费记录通过业务值逻辑关联，避免消息审计数据因业务表清理而丢失。
+
+## 9. PostgreSQL 排查 SQL
+
+### 9.1 查看订单和库存事实
 
 ```sql
-SELECT id, event_type, topic_name, message_tag, status,
-       retry_count, next_retry_at, deliver_at, last_error
+SELECT id, order_no, user_id, total_amount, status, created_at
+FROM orders
+ORDER BY id DESC;
+
+SELECT id, name, price, stock, status, updated_at
+FROM products
+ORDER BY id;
+```
+
+### 9.2 查看 Outbox 积压、失败和死信
+
+```sql
+SELECT id, aggregate_id, event_type, topic_name, message_tag,
+       status, retry_count, next_retry_at, locked_at,
+       last_error, created_at, published_at
 FROM mq_outbox_event
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, id DESC;
 ```
 
-典型状态：
+重点观察：
 
-```text
-PENDING -> PROCESSING -> PUBLISHED
-                    -> FAILED -> PROCESSING -> ...
-                    -> DEAD
-```
+- `PENDING/FAILED` 是否长期不再变化；
+- `PROCESSING` 的租约是否已经过期；
+- `DEAD` 的 `last_error` 是否指出配置或协议错误；
+- Broker 成功后是否进入 `PUBLISHED`。
 
-发布器崩溃窗口：Broker 已收消息，但数据库还没来得及把 Outbox 标成 `PUBLISHED`。恢复后会再次发送，所以该方案提供的是“至少一次”，不是“恰好一次”。
-
-### 6.3 支付订单
-
-```http
-POST /api/playground/rocketmq/orders/{orderId}/pay
-```
-
-SQL 使用条件更新：
+### 9.3 查看消费幂等和统计
 
 ```sql
-UPDATE orders
-SET status = 'PAID'
-WHERE id = ? AND status = 'PENDING';
+SELECT consumer_name, message_id, event_type, aggregate_id, consumed_at
+FROM mq_consumed_message
+ORDER BY consumed_at DESC, id DESC;
+
+SELECT id, created_count, paid_count, cancelled_count,
+       created_amount, last_event_at, updated_at
+FROM order_statistics;
 ```
 
-只有受影响行数为 1 的事务才能写 `ORDER_PAID` Outbox。受影响行数为 0 可能表示订单不存在，也可能表示另一事务已支付或已取消，不能继续无条件覆盖状态。
+这里的 `mq_consumed_message.message_id` 是合法且必需的消费幂等字段。
 
-### 6.4 订单超时为什么发送“检查”而不是“取消命令”
-
-30 分钟延迟消息到达时，订单可能已经支付。消费者必须重新读取当前状态，并执行 `PENDING -> CANCELLED` 条件更新；只有更新成功才按 productId 固定顺序恢复库存并发布 `ORDER_CANCELLED`。
-
-固定 productId 顺序可降低两个事务以相反顺序锁定多件商品而发生死锁的概率。
-
-## 7. RocketMQ 事务消息订单案例
-
-```http
-POST /api/playground/rocketmq/orders/transaction-message
-Content-Type: application/json
-
-{
-  "userId": 1,
-  "orderNo": "RMQ-TX-001",
-  "items": [
-    {"productId": 1, "quantity": 1}
-  ]
-}
-```
-
-完整步骤：
-
-```text
-1. PostgreSQL 独立事务写 PREPARED 回查记录
-2. 向 TRANSACTION Topic 发送半消息（消费者暂时不可见）
-3. 独立 Spring Bean 执行创建订单 + 扣库存
-4. 同一数据库事务把回查记录改为 COMMITTED 并保存 orderId
-5. 调用 RocketMQ transaction.commit()，半消息才对消费者可见
-```
-
-### 7.1 为什么只有 Broker 回查还不够
-
-`PREPARED` 必须先于半消息持久化，否则 Broker 回查时没有稳定的数据库事实。但这个顺序会产生一个必须显式处理的窄窗口：
-
-```text
-PostgreSQL 提交 PREPARED ── 进程/主机崩溃 ──X──> Broker 收到半消息
-```
-
-此时 Broker 从未见过这条半消息，所以它不可能主动发起回查。`PreparedTransactionCleanupScheduler`
-每 30 秒分批查找超过 `transaction-prepared-timeout-seconds` 的候选，每轮批量由
-`transaction-cleanup-batch-size` 限制。它的处理步骤是：
-
-1. 短事务读取“过期、仍为 `PREPARED`、且没有 `orderId`”的候选，不长时间锁住一批行；
-2. 对每条候选在独立短事务执行 `PREPARED -> ROLLED_BACK` 条件更新；
-3. 更新 1 行才表示清理器抢占终态；若根本没有半消息，数据库孤儿至此已收口；
-4. 更新 0 行必须重读；`COMMITTED` 说明本地事务先赢，`ROLLED_BACK` 说明 checker 或另一实例先赢，其他情况不猜测并留到下轮；
-5. 如果 Broker 其实已收到半消息，清理器不保存内存 `Transaction` 句柄，之后的 Broker checker 会读到 `ROLLED_BACK` 并回滚它。
-
-这与 checker 和本地事务使用同一个数据库裁决点：清理先赢时，本地事务的
-`PREPARED -> COMMITTED` 更新为 0，订单和库存整体回滚；本地事务先提交时，清理条件更新为 0 并重读 `COMMITTED`。
-
-`transaction-prepared-timeout-seconds` 是安全性边界，必须大于正常本地订单事务的最坏执行时间，
-并要把数据库行锁等待等尾延计入。该值过小时，checker/清理器会按规则先抢占 `ROLLED_BACK`，
-后到的慢订单事务在执行 `PREPARED -> COMMITTED` 时影响 0 行，其订单和库存修改会整体回滚。
-
-### 7.2 回滚后如何安全重试同一 orderNo
-
-如果 `business_key` 使用全局 `UNIQUE`，即使孤儿已收口为 `ROLLED_BACK`，同一 `orderNo`
-仍会永久插入失败。本案例使用 PostgreSQL 部分唯一索引：
+### 9.4 查看事务消息裁决
 
 ```sql
-CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
-    ON mq_transaction_record (business_key)
-    WHERE status IN ('PREPARED', 'COMMITTED');
+SELECT transaction_id, business_type, business_key, operation_type,
+       status, last_error, created_at, updated_at
+FROM mq_transaction_record
+ORDER BY created_at DESC, transaction_id DESC;
 ```
 
-- `PREPARED` 仍在执行：同 orderNo 新请求被拒绝；
-- `COMMITTED` 已形成订单事实：同 orderNo 永久被拒绝；
-- `ROLLED_BACK` 已终结且没有订单事实：旧记录保留审计，但不占用索引，可以使用新 `transactionId` 重试；
-- 多个重试并发：部分唯一索引只允许一条新 `PREPARED` 成功。
+如果长期存在 `PREPARED`，依次确认保护窗口、Checker 日志和 `PreparedTransactionCleanupTask` 是否运行。不要人工只改 Broker 状态而不核对 PostgreSQL 订单事实。
 
-状态更新和索引成员变化在同一 PostgreSQL 事务中原子提交，不需要先删记录或手工释放键。
-本学习项目的独立建表脚本直接创建上面的部分唯一索引，不包含旧结构迁移逻辑；重复执行脚本会重建
-5 张 `mq_*` 表并清空其中的学习记录。
+## 10. Dashboard 应该观察什么
 
-### 7.3 其他失败分支与 Broker 回查
+RocketMQ Dashboard 用于观察 Topic、ConsumerGroup、消费进度、重试和死信，不是业务事实来源：
 
-失败分支：
+1. `pg_order_events` 是否有 Outbox 三类事实事件；
+2. `pg_order_transactions` 是否有事务消息以及对应消费组进度；
+3. `pg_order_timeouts` 是否出现两种超时 Tag；
+4. 七个消费组是否在线、是否积压；
+5. 重试或 DLQ 消息的 Tag、Key、Broker messageId 和错误日志。
 
-- 本地事务明确失败：回查记录标为 `ROLLED_BACK`，调用 `rollback()`；
-- 本地事务方法抛异常但数据库提交结果不明确：先尝试 `PREPARED -> ROLLED_BACK` 条件更新；更新 0 行后必须重读，
-  若已是 `COMMITTED` 就提交半消息，若是 `ROLLED_BACK` 才回滚半消息，仍不明确则不猜测并等待回查；
-- 数据库已提交，但向 Broker 发送 commit 的网络调用失败：不能回滚已经提交的订单，保留 `COMMITTED`，等待 Broker 回查；
-- Broker 回查时只依赖 `mq_transaction_record` 持久状态裁决，不依赖应用内存 Map，应用重启后仍可判断。
+应用 `messageId` 用于端到端幂等，Broker messageId 用于 Dashboard 排查一次物理投递，两者不要混为一谈。
 
-回查映射：
+## 11. 必须理解的故障场景
 
-| 持久状态                   | 回查结果                                            |
-| ---------------------- | ----------------------------------------------- |
-| `COMMITTED`            | `COMMIT`                                        |
-| `ROLLED_BACK`          | `ROLLBACK`                                      |
-| 尚未超时的 `PREPARED`       | `UNKNOWN`，稍后再查                                  |
-| 已超时且没有订单事实的 `PREPARED` | 先用数据库条件更新抢占 `ROLLED_BACK` 终态；抢占成功才返回 `ROLLBACK` |
+### Broker 故障
 
-过期判断本身不能直接向 Broker 返回 `ROLLBACK`。回查必须先在独立短事务中执行
-`PREPARED -> ROLLED_BACK` 条件更新，把数据库状态作为与本地订单事务竞争的唯一裁决点：
+- Outbox：订单和消息意图仍可同事务提交；Relay 失败后指数退避，最终成功或进入 DEAD；
+- 事务消息：半消息未发出时本次业务失败并将 PREPARED 收口；半消息已到 Broker但回包不明时依赖回查。
 
-- 回查先更新成功：本地事务随后执行 `PREPARED -> COMMITTED` 会影响 0 行，并连同订单和库存修改一起回滚；
-- 本地事务先提交：回查的条件更新影响 0 行，必须重新读取记录，并根据 `COMMITTED` 返回 `COMMIT`；
-- 条件更新失败后仍未读到明确终态：返回 `UNKNOWN`，不能依据更新前的旧快照猜测回滚。
+### 重复投递
 
-## 8. Outbox 与事务消息如何选择
+- 缓存 delete 可重复；成功后以 `(consumer_name,message_id)` 记录完成；
+- 统计的幂等 INSERT 与 UPSERT 同事务；
+- 订单状态和库存恢复还由条件 UPDATE 兜底。
 
-| 对比项      | Transactional Outbox | RocketMQ 事务消息          |
-| -------- | -------------------- | ---------------------- |
-| 绑定 MQ 厂商 | 低，本地消息表是通用模式         | 高，依赖 RocketMQ 半消息和回查协议 |
-| 主事务路径    | 只写数据库，MQ 发布异步完成      | 主流程需要与 Broker 交互       |
-| 消息延迟     | 受轮询周期影响              | commit 后较快可见           |
-| 运维重点     | Outbox 堆积、锁恢复、发布重试   | 半消息回查、事务记录、UNKNOWN 时长  |
-| 迁移其他 MQ  | 发布适配器可替换             | 需要重做事务协调机制             |
-| 共同要求     | 消费幂等、状态条件更新、监控、补偿    | 消费幂等、状态条件更新、监控、补偿      |
+### 支付与取消竞争
 
-二者解决的核心问题相同：避免“数据库成功、消息丢失”这种双写不一致；解决步骤和依赖边界不同。
+两个线程都可能先读到 `PENDING`，但只有一个条件 UPDATE 可以成功。支付成功后超时检查只读到 `PAID` 并结束；取消先成功则支付不能再次推进状态，库存只恢复一次。
 
-## 9. 消费者幂等
+### 回查与 UNKNOWN
 
-RocketMQ 的可靠消费通常是至少一次投递，因此重复消息是正常边界，不是偶发异常。
+Checker 只信任持久化事务记录。记录不存在、协议不匹配或保护窗口内 PREPARED 都返回 UNKNOWN，不凭内存或异常文本猜测。
 
-消费者先尝试插入：
+### PREPARED 孤儿
 
-```sql
-INSERT INTO mq_consumed_message (...)
-VALUES (...)
-ON CONFLICT (consumer_name, message_id) DO NOTHING;
-```
+Broker 收到半消息时由 Checker 处理；Broker 根本没收到半消息时由 `PreparedTransactionCleanupTask` 处理。两者都以 `PREPARED -> 终态` 条件更新竞争，不覆盖 COMMITTED。
 
-唯一键是 `(consumer_name, message_id)`：
+### 重试多次仍失败和 DLQ
 
-- 同一个消费组重复收到同一业务消息时，只有第一次插入成功；
-- 不同消费组可以各执行一次自己的业务副作用；
-- 幂等记录和 PostgreSQL 业务变更必须处于同一本地事务，否则可能“记录已消费但业务没完成”。
+Outbox 发布侧有自己的 `DEAD` 状态；消费者侧持续失败由 RocketMQ 重试和 DLQ 承接。修复根因后再人工重放，重放仍使用原稳定业务 messageId，不能绕过幂等键制造第二次副作用。
 
-缓存删除天然适合重复执行，但发送通知、累计统计、恢复库存都必须有幂等保护。
+## 12. 消息顺序边界
 
-## 10. 运维观察接口
+本案例没有承诺强 FIFO：
 
-统一前缀：
+- 缓存和统计是不同消费组，本来就独立推进；
+- 多实例、重试和网络抖动都可能改变到达顺序；
+- 消费者以数据库当前状态、事务记录和幂等键处理消息，不假设“创建一定紧挨着支付”；
+- 付款超时消息只负责未来重新检查，不能收到就无条件取消。
 
-```text
-/api/playground/rocketmq/operations
-```
+如果某项新业务真的依赖严格顺序，应先明确聚合键、分区策略、并发度和失败补偿，再单独设计；不要把普通可靠消息案例误认为自动具备全局顺序。
 
-可分页观察：
+## 13. 推荐学习顺序
 
-- Outbox 状态和失败原因；
-- 事务消息持久回查记录；
-- 每个消费者的幂等记录；
-- 模拟通知发送日志；
-- 订单事件统计。
-
-当统计表还没有记录时，接口返回字段为 0 的稳定对象，而不是让前端处理 `null`。
-
-## 11. 推荐故障演练
-
-### 11.1 数据库成功、消息暂时发不出去
-
-停止 Proxy，调用 Outbox 创建订单，确认订单和 `PENDING/FAILED` Outbox 同时存在；恢复 Proxy 后观察定时任务重试并标为 `PUBLISHED`。
-
-### 11.2 Broker 已收消息、Outbox 未标记成功
-
-这是非常窄的崩溃窗口，最终效果是消息可能重复。重点不是强行模拟每个纳秒窗口，而是检查消费者唯一约束能否让重复副作用变成无操作。
-
-### 11.3 PREPARED 已持久化、半消息尚未发送
-
-在 `RocketTransactionMessageService` 写入 PREPARED 后、调用 `beginTransaction` 前模拟进程中断，
-并观察 `PreparedTransactionCleanupScheduler`。记录超过保护窗口后应通过条件更新进入
-`ROLLED_BACK`，然后同一 `orderNo` 才能用新 `transactionId` 受控重试。
-
-### 11.4 消费持续失败
-
-发送 `failTimes` 大于最大重试次数的消息，在 Dashboard 查看重试次数和 `%DLQ%pg_learning_retry_demo_group_v1`。
-
-### 11.5 重复支付或超时与支付并发
-
-对同一订单并发调用支付，并等待超时消费者执行。最终只能有一个 `PENDING -> PAID/CANCELLED` 条件更新成功，库存恢复只能发生一次。
-
-### 11.6 顺序和过期消息
-
-对同一 businessKey 发送多条 FIFO 消息观察局部顺序；对业务状态事件仍应携带版本或发生时间，在消费者侧拒绝旧版本覆盖新状态。FIFO 能减少乱序，但不能替代业务状态机。
-
-## 12. 查看顺序建议
-
-第一次学习按以下顺序：
-
-1. `RocketMqNames`：先看 Topic、Tag、ConsumerGroup；
-2. `RocketMessageEnvelope`：理解业务消息协议；
-3. `RocketMessagePublisher`：看四类消息如何调用官方客户端；
-4. 基础 Demo Controller 和 Consumer：理解发送与消费；
-5. `OutboxEventService` 与 `OutboxPublishScheduler`：理解可靠补发；
-6. `RocketOrderConsumerService`：理解幂等、条件更新和库存恢复；
-7. `RocketTransactionMessageService` 与事务回查器：理解半消息；
-8. `PreparedTransactionCleanupScheduler`：理解 Broker 没有半消息时的孤儿收口与并发裁决；
-9. Mapper XML 和 SQL：把 Java 流程落回数据库原子操作；
-10. Dashboard 与运维接口：建立可观测性视角。
-
-不要从 Controller 一路机械跟方法调用。每学一个案例，都先回答三句话：
-
-- 业务事实先保存在哪里？
-- 失败后由谁重试，重试依据保存在哪里？
-- 重复执行时靠什么保证不会产生第二次业务副作用？
+1. 先查询同一商品两次，观察 Cache Aside 的数据库回填和 Redis 命中；
+2. 使用 Outbox 创建订单，查看订单、库存和两条 Outbox 意图同事务出现；
+3. 观察 Relay 的领取、事务外发送和短事务回写；
+4. 支付订单并观察支付与超时取消的条件竞争；
+5. 使用事务消息入口创建订单，跟踪 PREPARED、半消息、COMMITTED、commit 与 Checker；
+6. 对照七个消费组，确认缓存、统计、超时调度各自只承担一个真实职责；
+7. 最后模拟 Broker 不可用、重复投递、消费异常和 PREPARED 孤儿，结合 Dashboard 与四张表判断系统为什么没有静默丢失副作用。

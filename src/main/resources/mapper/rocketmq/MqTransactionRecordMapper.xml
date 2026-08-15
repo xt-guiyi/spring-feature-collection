@@ -4,47 +4,61 @@
 
     <sql id="transactionColumns">
         transaction_id AS transactionId,
+        business_type AS businessType,
         business_key AS businessKey,
-        request_payload::text AS requestPayload,
+        operation_type AS operationType,
         status,
-        order_id AS orderId,
         last_error AS lastError,
         created_at AS createdAt,
         updated_at AS updatedAt
     </sql>
 
     <!--
-        半消息发送前在独立短事务插入 PREPARED。transaction_id 是 Broker 回查和本地记录的共同关联键。
-        business_key 使用仅包含 PREPARED/COMMITTED 的部分唯一索引：进行中或已成功的命令
-        拒绝同 orderNo 重复准备，ROLLED_BACK 则保留审计记录但释放新 transactionId 的受控重试资格。
-        如果正式项目需要“重复请求返回原结果”，还应增加按 business_key 查询活跃记录、
-        校验原请求内容并返回已有结果的幂等入口；部分唯一索引只负责最终并发保护。
+        半消息发送前在独立短事务插入 PREPARED。transaction_id 同时作为信封 messageId，
+        Broker 回查和消费幂等不再维护第二份相同 UUID。
+
+        并发防重必须由数据库部分唯一索引最终裁决，不能使用“先查不存在再插入”：
+        1. PREPARED/COMMITTED 按 business_type + business_key + operation_type 唯一；
+        2. ROLLED_BACK 保留审计记录，但不占用新的受控重试资格；
+        3. 基础设施不理解 ORDER、CREATE 等具体枚举，只负责保存调用方传入的非空业务协议值。
     -->
     <insert id="insertPrepared" parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqTransactionRecord">
         INSERT INTO mq_transaction_record (
-            transaction_id, business_key, request_payload, status,
-            order_id, last_error, created_at, updated_at
+            transaction_id, business_type, business_key, operation_type, status,
+            last_error, created_at, updated_at
         ) VALUES (
-            #{transactionId}, #{businessKey}, CAST(#{requestPayload} AS JSONB), 'PREPARED',
-            #{orderId}, #{lastError}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+            #{transactionId}, #{businessType}, #{businessKey}, #{operationType}, 'PREPARED',
+            #{lastError}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
         )
     </insert>
 
     <!--
         仅 PREPARED 可转 COMMITTED，防止延迟回查或异常补偿把已回滚事务复活。
-        本 Mapper 单独只能原子更新事务记录；只有调用方把“订单事实写入”和本方法调用放进同一个
+        本 Mapper 单独只能原子更新事务记录；只有调用方把“业务事实写入”和本方法调用放进同一个
         PostgreSQL 本地事务，二者才会随同一次提交或回滚共同原子生效。
         返回 1 仅表示状态条件更新成功，返回 0 必须重新读取状态后决定幂等处理。
     -->
     <update id="markCommitted">
         UPDATE mq_transaction_record
         SET status = 'COMMITTED',
-            order_id = #{orderId},
             last_error = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE transaction_id = #{transactionId}
           AND status = 'PREPARED'
     </update>
+
+    <!--
+        按通用业务三元组判断某次业务操作是否已经提交。
+        业务 Service 自己决定 businessType/businessKey/operationType 的取值，基础设施不写死订单语义。
+    -->
+    <select id="countCommitted" resultType="int">
+        SELECT COUNT(*)
+        FROM mq_transaction_record
+        WHERE business_type = #{businessType}
+          AND business_key = #{businessKey}
+          AND operation_type = #{operationType}
+          AND status = 'COMMITTED'
+    </select>
 
     <!--
         明确本地失败才写 ROLLED_BACK；不确定状态必须保留 PREPARED 交给 Broker 回查，
@@ -64,15 +78,13 @@
         多实例可能读到同一条旧 PREPARED，但候选快照不是裁决依据；随后每条
         markRolledBack 的 status = 'PREPARED' 条件更新才是唯一并发裁决点。
 
-        order_id 非空却仍为 PREPARED 是不应出现的矛盾事实；主动清理不会猜测回滚它，
-        与 Broker checker 的保守规则保持一致。
+        候选查询不理解具体业务字段；状态条件更新仍是清理器与本地事务之间的最终并发裁决点。
     -->
     <select id="selectExpiredPreparedCandidates"
             resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqTransactionRecord">
         SELECT <include refid="transactionColumns"/>
         FROM mq_transaction_record
         WHERE status = 'PREPARED'
-          AND order_id IS NULL
           AND created_at &lt;= #{expiredBefore}
         ORDER BY created_at ASC, transaction_id ASC
         LIMIT #{batchSize}
@@ -82,24 +94,6 @@
         SELECT <include refid="transactionColumns"/>
         FROM mq_transaction_record
         WHERE transaction_id = #{transactionId}
-    </select>
-
-    <select id="selectPage" resultType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqTransactionRecord">
-        SELECT <include refid="transactionColumns"/>
-        FROM mq_transaction_record
-        <where>
-            <if test="status != null and status != ''">status = #{status}</if>
-        </where>
-        ORDER BY created_at DESC, transaction_id DESC
-        LIMIT #{pageSize} OFFSET #{offset}
-    </select>
-
-    <select id="countPage" resultType="long">
-        SELECT COUNT(*)
-        FROM mq_transaction_record
-        <where>
-            <if test="status != null and status != ''">status = #{status}</if>
-        </where>
     </select>
 
 </mapper>

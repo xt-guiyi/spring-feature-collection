@@ -2,6 +2,7 @@ package com.xt.xiaoxingxing.playground.rocketmq.mapper;
 
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder;
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgOrderProduct;
+import com.xt.xiaoxingxing.playground.postgresql.entity.PgProduct;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -17,6 +18,12 @@ import java.util.List;
 public interface MqOrderBusinessMapper {
 
     PgOrder selectOrderById(@Param("orderId") Long orderId);
+
+    /** 按订单稳定业务键查询；事务记录、消息 aggregateId 和 RocketMQ Key 都统一使用 orderNo。 */
+    PgOrder selectOrderByOrderNo(@Param("orderNo") String orderNo);
+
+    /** Cache Aside 未命中或 Redis 故障时，从 PostgreSQL 读取权威商品库存。 */
+    PgProduct selectProductById(@Param("productId") Long productId);
 
     int markPaid(@Param("orderId") Long orderId);
 

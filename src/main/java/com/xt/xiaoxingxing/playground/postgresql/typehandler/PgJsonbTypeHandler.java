@@ -1,11 +1,11 @@
 package com.xt.xiaoxingxing.playground.postgresql.typehandler;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.ibatis.type.BaseTypeHandler;
 import org.apache.ibatis.type.JdbcType;
 import org.postgresql.util.PGobject;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.sql.CallableStatement;
 import java.sql.PreparedStatement;
@@ -25,10 +25,10 @@ import java.sql.SQLException;
 public class PgJsonbTypeHandler extends BaseTypeHandler<JsonNode> {
 
     /**
-     * TypeHandler 由 MyBatis 反射创建，不依赖 Spring 注入，因此保留一个线程安全的 ObjectMapper。
+     * TypeHandler 由 MyBatis 反射创建，不依赖 Spring 注入，因此保留一个线程安全的 JsonMapper。
      * 本案例只处理标准 JSON 数据，不涉及需要额外模块的日期对象序列化。
      */
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
 
     @Override
     public void setNonNullParameter(PreparedStatement ps, int i, JsonNode parameter, JdbcType jdbcType)
@@ -56,8 +56,8 @@ public class PgJsonbTypeHandler extends BaseTypeHandler<JsonNode> {
 
     private String write(JsonNode value) throws SQLException {
         try {
-            return OBJECT_MAPPER.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (JacksonException ex) {
             throw new SQLException("JSONB序列化失败", ex);
         }
     }
@@ -67,8 +67,8 @@ public class PgJsonbTypeHandler extends BaseTypeHandler<JsonNode> {
             return null;
         }
         try {
-            return OBJECT_MAPPER.readTree(json);
-        } catch (JsonProcessingException ex) {
+            return JSON_MAPPER.readTree(json);
+        } catch (JacksonException ex) {
             throw new SQLException("JSONB反序列化失败", ex);
         }
     }

@@ -16,21 +16,28 @@ import java.util.List;
 @Mapper
 public interface MqTransactionRecordMapper {
 
+    /**
+     * 插入 PREPARED 记录。
+     *
+     * <p>活跃记录由 {@code business_type + business_key + operation_type} 部分唯一索引防重。
+     * Mapper 不做“先查再插”，因为该写法存在并发窗口。</p>
+     */
     int insertPrepared(MqTransactionRecord record);
 
-    int markCommitted(@Param("transactionId") String transactionId, @Param("orderId") Long orderId);
+    int markCommitted(@Param("transactionId") String transactionId);
 
     int markRolledBack(@Param("transactionId") String transactionId, @Param("lastError") String lastError);
+
+    /** 按通用业务三元组统计已提交记录；活跃部分唯一索引保证正常结果最多为 1。 */
+    int countCommitted(@Param("businessType") String businessType,
+                       @Param("businessKey") String businessKey,
+                       @Param("operationType") String operationType);
 
     List<MqTransactionRecord> selectExpiredPreparedCandidates(
             @Param("expiredBefore") LocalDateTime expiredBefore,
             @Param("batchSize") int batchSize);
 
+    /** transactionId 同时也是事务消息信封的 messageId，Broker 回查直接按本表主键读取。 */
     MqTransactionRecord selectById(@Param("transactionId") String transactionId);
 
-    List<MqTransactionRecord> selectPage(@Param("status") String status,
-                                         @Param("offset") long offset,
-                                         @Param("pageSize") int pageSize);
-
-    long countPage(@Param("status") String status);
 }

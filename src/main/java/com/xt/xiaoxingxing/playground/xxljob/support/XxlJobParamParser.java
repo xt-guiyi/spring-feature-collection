@@ -1,12 +1,12 @@
 package com.xt.xiaoxingxing.playground.xxljob.support;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xxl.job.core.context.XxlJobHelper;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -21,11 +21,11 @@ import java.util.stream.Collectors;
 @Component
 public class XxlJobParamParser {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
     private final Validator validator;
 
-    public XxlJobParamParser(ObjectMapper objectMapper, Validator validator) {
-        this.objectMapper = objectMapper;
+    public XxlJobParamParser(JsonMapper jsonMapper, Validator validator) {
+        this.jsonMapper = jsonMapper;
         this.validator = validator;
     }
 
@@ -44,9 +44,13 @@ public class XxlJobParamParser {
 
         final T parameter;
         try {
-            parameter = objectMapper.readValue(rawParam, parameterType);
-        } catch (JsonProcessingException exception) {
-            // 不把整段原始参数拼进异常，避免任务参数包含令牌等敏感内容时泄漏到调度日志。
+            parameter = jsonMapper.readValue(rawParam, parameterType);
+        } catch (JacksonException exception) {
+            /*
+             * Jackson 3 使用 JacksonException 统一表示 JSON 语法、类型转换和数据绑定失败。
+             * 不把整段原始参数拼进异常，避免任务参数包含令牌等敏感内容时泄漏到调度日志；
+             * getOriginalMessage() 只提取 Jackson 的核心原因，完整异常仍作为 cause 保留。
+             */
             throw new IllegalArgumentException(
                     "XXL-JOB任务参数不是合法的" + parameterType.getSimpleName()
                             + " JSON：" + exception.getOriginalMessage(),

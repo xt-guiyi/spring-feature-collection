@@ -23,7 +23,10 @@ public class RocketMessageEnvelope<T> {
     /** JSON 信封和负载的协议版本。 */
     private Integer schemaVersion;
 
-    /** 聚合根 ID；订单事件通常为 orderId，事务消息通常为 transactionId。 */
+    /**
+     * 事务消息使用事务记录的 businessKey 作为聚合标识；当前订单业务的 CREATE、PAY、CANCEL 均使用 orderNo。
+     * transactionId 不放在这里，它只与信封 messageId 共用同一个 UUID；本地数据库 orderId 也不作为跨系统聚合键。
+     */
     private String aggregateId;
 
     /** 业务事件发生时间，不能用消费者实际收到消息的时间替代。 */

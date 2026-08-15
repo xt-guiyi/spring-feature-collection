@@ -1,72 +1,80 @@
 server:
-  port: ${SERVER_PORT:3379}
+  port: 3379
 
 spring:
   application:
-    name: ${SPRING_APPLICATION_NAME:xiaoxingxing}
+    name: xiaoxingxing
+
+  output:
+    ansi:
+      # %clr 负责定义哪些片段着色；该开关决定控制台是否真正输出 ANSI 颜色码。
+      enabled: always
 
   mongodb:
-    # Spring Boot 4 使用 spring.mongodb.uri；账号、地址和业务库均由 YAML/环境变量提供。
-    uri: ${MONGODB_URI:mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin}
+    # Spring Boot 4 使用 spring.mongodb.uri；学习环境在 YAML 中直接固定账号、地址和业务库。
+    uri: mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin
   data:
     mongodb:
       # 学习案例通过 @Indexed / @CompoundIndex 声明索引，启动时自动创建。
-      auto-index-creation: ${MONGODB_AUTO_INDEX_CREATION:true}
+      auto-index-creation: true
       representation:
         # NUMBER 题中的 BigDecimal 按 Decimal128 保存，避免退化为字符串。
-        big-decimal: ${MONGODB_BIG_DECIMAL_REPRESENTATION:decimal128}
+        big-decimal: decimal128
     redis:
       # Spring Boot 4 的 Redis 前缀是 spring.data.redis；Spring Data Redis 与 Redisson 共用这一套值。
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      username: ${REDIS_USERNAME:}
-      password: ${REDIS_PASSWORD:}
-      database: ${REDIS_DATABASE:0}
-      timeout: ${REDIS_TIMEOUT:3s}
-      connect-timeout: ${REDIS_CONNECT_TIMEOUT:3s}
+      host: localhost
+      port: 6379
+      username: ""
+      password: ""
+      database: 0
+      timeout: 3s
+      connect-timeout: 3s
       ssl:
-        enabled: ${REDIS_SSL_ENABLED:false}
+        enabled: false
 
   datasource:
     business:
-      url: ${BUSINESS_DATASOURCE_URL:jdbc:postgresql://localhost:5432/postgres}
-      username: ${BUSINESS_DATASOURCE_USERNAME:root}
-      password: ${BUSINESS_DATASOURCE_PASSWORD:123456}
-      driver-class-name: ${BUSINESS_DATASOURCE_DRIVER:org.postgresql.Driver}
+      url: jdbc:postgresql://localhost:5432/postgres
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
     playground:
       # 固定上海会话时区，确保 orders.created_at 与 XXL-JOB 的上海业务日使用同一时间基准。
-      url: ${PLAYGROUND_DATASOURCE_URL:jdbc:postgresql://localhost:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai}
-      username: ${PLAYGROUND_DATASOURCE_USERNAME:root}
-      password: ${PLAYGROUND_DATASOURCE_PASSWORD:123456}
-      driver-class-name: ${PLAYGROUND_DATASOURCE_DRIVER:org.postgresql.Driver}
+      url: jdbc:postgresql://localhost:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
 
   jackson:
-    serialization:
-      # 自定义 ObjectMapper 也会读取这个值，HTTP 与 RocketMQ JSON 使用相同日期格式。
-      write-dates-as-timestamps: ${JACKSON_WRITE_DATES_AS_TIMESTAMPS:false}
+    datatype:
+      datetime:
+        # Spring Boot 4 / Jackson 3 已把日期开关从 SerializationFeature 移到 DateTimeFeature。
+        # 项目业务代码统一注入 Boot 自动配置的 JsonMapper，不再额外声明 Jackson 2 ObjectMapper。
+        write-dates-as-timestamps: false
 
   task:
     scheduling:
       # Outbox 与事务清理是两个独立任务，显式线程数避免依赖 Spring 的隐式默认值。
       pool:
-        size: ${TASK_SCHEDULING_POOL_SIZE:2}
-      thread-name-prefix: ${TASK_SCHEDULING_THREAD_NAME_PREFIX:playground-scheduling-}
+        size: 2
+      thread-name-prefix: playground-scheduling-
 
 logging:
   level:
-    root: ${LOGGING_LEVEL_ROOT:INFO}
-    web: ${LOGGING_LEVEL_WEB:INFO}
+    root: INFO
+    web: INFO
   # logback-spring.xml 只负责装配 Appender，具体输出格式从这里读取。
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level --- [%15.15thread] %-40.40logger{39} : %msg%n"
+    # 级别颜色由 Spring Boot 根据 INFO/WARN/ERROR 自动选择，时间和结构字符弱化，Logger 使用青色。
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(---){faint} %clr([%15.15thread]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n"
 
 application:
   cors:
-    # 默认环境关闭跨域；需要开放时通过环境变量显式开启并指定可信来源。
-    enabled: ${CORS_ENABLED:false}
+    # 默认环境固定关闭跨域；需要开放时直接修改本配置并指定可信来源。
+    enabled: false
     path-pattern: "/**"
     allowed-origins:
-      - ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
+      - http://localhost:5173
     allowed-methods:
       - GET
       - POST
@@ -75,115 +83,119 @@ application:
       - OPTIONS
     allowed-headers:
       - "*"
-    allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
+    allow-credentials: true
   open-api:
-    title: ${OPENAPI_TITLE:API 文档}
-    version: ${OPENAPI_VERSION:1.0.0}
-    description: ${OPENAPI_DESCRIPTION:项目接口文档}
-    group: ${OPENAPI_GROUP:playground}
-    display-name: ${OPENAPI_DISPLAY_NAME:playground}
+    title: API 文档
+    version: 1.0.0
+    description: 项目接口文档
+    group: playground
+    display-name: playground
 
 # RocketMQ 5.x SDK 的 endpoints 指向 Proxy 的 gRPC 端口，不是 NameServer 9876。
 rocketmq:
   producer:
-    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    endpoints: localhost:18081
     # Starter 用该列表预取路由；Topic 类型仍必须在 Broker 中预先创建。
-    topic: "${ROCKETMQ_TOPIC_NORMAL:pg_learning_normal},${ROCKETMQ_TOPIC_FIFO:pg_learning_fifo},${ROCKETMQ_TOPIC_DELAY:pg_learning_delay},${ROCKETMQ_TOPIC_TRANSACTION:pg_learning_transaction}"
-    request-timeout: ${ROCKETMQ_REQUEST_TIMEOUT_SECONDS:5}
-    max-attempts: ${ROCKETMQ_SEND_MAX_ATTEMPTS:3}
-    ssl-enabled: ${ROCKETMQ_PRODUCER_SSL_ENABLED:false}
-    namespace: ${ROCKETMQ_NAMESPACE:}
-    access-key: ${ROCKETMQ_ACCESS_KEY:}
-    secret-key: ${ROCKETMQ_SECRET_KEY:}
+    topic: "pg_order_events,pg_order_timeouts,pg_order_transactions"
+    request-timeout: 5
+    max-attempts: 3
+    ssl-enabled: false
+    namespace: ""
+    access-key: ""
+    secret-key: ""
 
 playground:
   mybatis:
     # Playground 使用手工 SqlSessionFactory，因此这些值由专用属性类显式应用。
     mapper-locations:
       - "classpath*:mapper/**/*.xml"
-    map-underscore-to-camel-case: ${PLAYGROUND_MYBATIS_CAMEL_CASE:true}
-    log-impl: ${PLAYGROUND_MYBATIS_LOG_IMPL:org.apache.ibatis.logging.slf4j.Slf4jImpl}
-    pagination-db-type: ${PLAYGROUND_MYBATIS_DB_TYPE:POSTGRE_SQL}
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    pagination-db-type: POSTGRE_SQL
 
   redis:
     lock:
-      wait-time: ${REDIS_LOCK_WAIT_TIME:3s}
-      lease-time: ${REDIS_LOCK_LEASE_TIME:10s}
-      simulated-work-duration: ${REDIS_LOCK_SIMULATED_WORK_DURATION:1s}
+      wait-time: 3s
+      lease-time: 10s
+      simulated-work-duration: 1s
 
   rocketmq:
-    enabled: ${ROCKETMQ_LEARNING_ENABLED:true}
-    endpoints: ${ROCKETMQ_ENDPOINTS:localhost:18081}
+    enabled: true
+    endpoints: localhost:18081
 
     # 名称由应用配置统一提供；若改名，还必须同步 Docker 中的 Broker 初始化命令。
     topics:
-      normal: ${ROCKETMQ_TOPIC_NORMAL:pg_learning_normal}
-      fifo: ${ROCKETMQ_TOPIC_FIFO:pg_learning_fifo}
-      delay: ${ROCKETMQ_TOPIC_DELAY:pg_learning_delay}
-      transaction: ${ROCKETMQ_TOPIC_TRANSACTION:pg_learning_transaction}
+      normal: pg_order_events
+      delay: pg_order_timeouts
+      transaction: pg_order_transactions
     tags:
-      demo: ${ROCKETMQ_TAG_DEMO:DEMO}
-      retry: ${ROCKETMQ_TAG_RETRY:RETRY_DEMO}
-      order-created: ${ROCKETMQ_TAG_ORDER_CREATED:ORDER_CREATED}
-      order-paid: ${ROCKETMQ_TAG_ORDER_PAID:ORDER_PAID}
-      order-cancelled: ${ROCKETMQ_TAG_ORDER_CANCELLED:ORDER_CANCELLED}
-      order-timeout: ${ROCKETMQ_TAG_ORDER_TIMEOUT:ORDER_PAYMENT_TIMEOUT_CHECK}
+      order-created: ORDER_CREATED
+      order-paid: ORDER_PAID
+      order-cancelled: ORDER_CANCELLED
+      outbox-timeout: OUTBOX_PAYMENT_TIMEOUT_CHECK
+      transaction-timeout: TRANSACTION_PAYMENT_TIMEOUT_CHECK
     consumer-groups:
-      normal-demo: ${ROCKETMQ_GROUP_NORMAL_DEMO:pg_learning_normal_demo_group_v1}
-      broadcast-audit: ${ROCKETMQ_GROUP_BROADCAST_AUDIT:pg_learning_broadcast_audit_group_v1}
-      broadcast-notification: ${ROCKETMQ_GROUP_BROADCAST_NOTIFICATION:pg_learning_broadcast_notification_group_v1}
-      fifo-demo: ${ROCKETMQ_GROUP_FIFO_DEMO:pg_learning_fifo_demo_group_v1}
-      delay-demo: ${ROCKETMQ_GROUP_DELAY_DEMO:pg_learning_delay_demo_group_v1}
-      retry-demo: ${ROCKETMQ_GROUP_RETRY_DEMO:pg_learning_retry_demo_group_v1}
-      order-cache: ${ROCKETMQ_GROUP_ORDER_CACHE:pg_learning_order_cache_group_v1}
-      order-statistics: ${ROCKETMQ_GROUP_ORDER_STATISTICS:pg_learning_order_statistics_group_v1}
-      order-notification: ${ROCKETMQ_GROUP_ORDER_NOTIFICATION:pg_learning_order_notification_group_v1}
-      order-timeout: ${ROCKETMQ_GROUP_ORDER_TIMEOUT:pg_learning_order_timeout_group_v1}
-      transaction-order: ${ROCKETMQ_GROUP_TRANSACTION_ORDER:pg_learning_transaction_order_group_v1}
+      outbox-order-cache: pg_outbox_order_cache_group_v1
+      outbox-order-statistics: pg_outbox_order_statistics_group_v1
+      outbox-order-timeout: pg_outbox_order_timeout_group_v1
+      transaction-order-cache: pg_transaction_order_cache_group_v1
+      transaction-order-statistics: pg_transaction_order_statistics_group_v1
+      transaction-timeout-scheduler: pg_transaction_timeout_scheduler_group_v1
+      transaction-order-timeout: pg_transaction_order_timeout_group_v1
+    # 支付不改变商品库存，因此缓存组只订阅创建和取消；统计组订阅三种订单事实。
+    subscriptions:
+      cache-events: ORDER_CREATED || ORDER_CANCELLED
+      statistics-events: ORDER_CREATED || ORDER_PAID || ORDER_CANCELLED
     consumer:
-      ssl-enabled: ${ROCKETMQ_CONSUMER_SSL_ENABLED:false}
-      request-timeout: ${ROCKETMQ_CONSUMER_REQUEST_TIMEOUT_SECONDS:3}
-      max-cached-message-count: ${ROCKETMQ_CONSUMER_MAX_CACHED_MESSAGE_COUNT:1024}
-      max-cache-message-size-in-bytes: ${ROCKETMQ_CONSUMER_MAX_CACHE_BYTES:67108864}
-      consumption-thread-count: ${ROCKETMQ_CONSUMER_THREAD_COUNT:20}
-      filter-expression-type: ${ROCKETMQ_CONSUMER_FILTER_EXPRESSION_TYPE:tag}
-      namespace: ${ROCKETMQ_NAMESPACE:}
-      access-key: ${ROCKETMQ_ACCESS_KEY:}
-      secret-key: ${ROCKETMQ_SECRET_KEY:}
+      ssl-enabled: false
+      request-timeout: 3
+      max-cached-message-count: 1024
+      max-cache-message-size-in-bytes: 67108864
+      consumption-thread-count: 20
+      filter-expression-type: tag
+      namespace: ""
+      access-key: ""
+      secret-key: ""
 
-    order-timeout-millis: ${ROCKETMQ_ORDER_TIMEOUT_MILLIS:1800000}
-    transaction-prepared-timeout-seconds: ${ROCKETMQ_TRANSACTION_PREPARED_TIMEOUT_SECONDS:120}
-    transaction-cleanup-batch-size: ${ROCKETMQ_TRANSACTION_CLEANUP_BATCH_SIZE:50}
+    order-timeout-millis: 1800000
+    delay:
+      # 两套超时链路统一使用该最小延迟；过期任务也不会把 0 秒传给 DELAY API。
+      minimum-broker-delay-seconds: 1
+    product-cache:
+      # 最终 Redis Key 为 key-prefix + productId，例如 playground:product:1。
+      key-prefix: "playground:product:"
+      ttl-seconds: 300
+    transaction-prepared-timeout-seconds: 120
+    transaction-cleanup-batch-size: 50
     transaction-cleanup:
-      fixed-delay-millis: ${ROCKETMQ_TRANSACTION_CLEANUP_FIXED_DELAY_MILLIS:30000}
-      initial-delay-millis: ${ROCKETMQ_TRANSACTION_CLEANUP_INITIAL_DELAY_MILLIS:30000}
+      fixed-delay-millis: 30000
+      initial-delay-millis: 30000
     outbox:
-      batch-size: ${ROCKETMQ_OUTBOX_BATCH_SIZE:20}
-      fixed-delay-millis: ${ROCKETMQ_OUTBOX_FIXED_DELAY_MILLIS:3000}
-      lock-timeout-seconds: ${ROCKETMQ_OUTBOX_LOCK_TIMEOUT_SECONDS:60}
-      max-publish-retries: ${ROCKETMQ_OUTBOX_MAX_RETRIES:10}
-      minimum-broker-delay-millis: ${ROCKETMQ_OUTBOX_MINIMUM_BROKER_DELAY_MILLIS:1000}
+      batch-size: 20
+      fixed-delay-millis: 3000
+      lock-timeout-seconds: 60
+      max-publish-retries: 10
       retry:
-        initial-delay-seconds: ${ROCKETMQ_OUTBOX_RETRY_INITIAL_DELAY_SECONDS:5}
-        max-delay-seconds: ${ROCKETMQ_OUTBOX_RETRY_MAX_DELAY_SECONDS:300}
-        max-exponent: ${ROCKETMQ_OUTBOX_RETRY_MAX_EXPONENT:6}
+        initial-delay-seconds: 5
+        max-delay-seconds: 300
+        max-exponent: 6
 
 # XXL-JOB Executor 默认关闭；开启后 Admin 必须能访问 Executor 的 address/port。
 xxl:
   job:
     admin:
-      addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:18083}
-      access-token: ${XXL_JOB_ACCESS_TOKEN:xxl-job-learning-token}
-      timeout: ${XXL_JOB_ADMIN_TIMEOUT_SECONDS:3}
+      addresses: http://127.0.0.1:18083
+      access-token: xxl-job-learning-token
+      timeout: 3
     executor:
-      enabled: ${XXL_JOB_EXECUTOR_ENABLED:false}
-      appname: ${XXL_JOB_EXECUTOR_APPNAME:spring-feature-collection-executor}
-      address: ${XXL_JOB_EXECUTOR_ADDRESS:http://host.docker.internal:19999}
-      ip: ${XXL_JOB_EXECUTOR_IP:}
-      port: ${XXL_JOB_EXECUTOR_PORT:19999}
-      log-path: ${XXL_JOB_EXECUTOR_LOG_PATH:/tmp/xxl-job/jobhandler}
-      log-retention-days: ${XXL_JOB_EXECUTOR_LOG_RETENTION_DAYS:7}
-      excluded-package: ${XXL_JOB_EXECUTOR_EXCLUDED_PACKAGE:org.springframework,spring}
+      enabled: false
+      appname: spring-feature-collection-executor
+      address: http://host.docker.internal:19999
+      ip: ""
+      port: 19999
+      log-path: /tmp/xxl-job/jobhandler
+      log-retention-days: 7
+      excluded-package: org.springframework,spring
     learning:
       # 调度重试跨午夜时 logDateTime 可能变化；严格重跑仍应在任务参数中显式传 businessDate。
-      business-zone: ${XXL_JOB_LEARNING_BUSINESS_ZONE:Asia/Shanghai}
+      business-zone: Asia/Shanghai

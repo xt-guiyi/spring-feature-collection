@@ -4,9 +4,9 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.xt.xiaoxingxing.playground.postgresql.typehandler.PgJsonbTypeHandler;
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
 

@@ -1,7 +1,7 @@
 package com.xt.xiaoxingxing.playground.rocketmq.support;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import com.xt.xiaoxingxing.playground.rocketmq.config.RocketMqNames;
 import com.xt.xiaoxingxing.playground.rocketmq.message.RocketMessageEnvelope;
 import lombok.RequiredArgsConstructor;
@@ -14,30 +14,42 @@ import java.util.UUID;
 
 /**
  * 统一负责“业务对象 ↔ JSON 信封”的协议边界。
- *
- * <p>统一使用项目的 ObjectMapper，而不是 Java 原生序列化。JSON 更容易跨语言、可被日志和 Dashboard 周边工具
- * 观察，也避免把 JVM 类名和实现细节固化为消息契约。</p>
  */
 @Component
 @RequiredArgsConstructor
 public class RocketMessageCodec {
 
-    private final ObjectMapper objectMapper;
+    /** Spring Boot 4.1 自动配置的 Jackson 3 JsonMapper，同时服务 HTTP、缓存和消息信封。 */
+    private final JsonMapper jsonMapper;
 
     /**
      * 创建当前版本信封；messageId 在发送前产生，因此重复发布可保持同一个业务幂等键。
      *
-     * <p>{@code ObjectMapper.valueToTree(null)} 返回的是表示 JSON {@code null} 的 {@link JsonNode}，
+     * <p>{@code JsonMapper.valueToTree(null)} 返回的是表示 JSON {@code null} 的 {@link JsonNode}，
      * 而不是 Java {@code null}。因此构造完成后必须复用完整信封校验，避免空业务负载进入序列化或发布阶段。</p>
      */
     public RocketMessageEnvelope<JsonNode> newEnvelope(String eventType, String aggregateId, Object payload) {
+        return newEnvelope(UUID.randomUUID().toString(), eventType, aggregateId, payload);
+    }
+
+    /**
+     * 使用调用方提供的稳定 messageId 创建信封。
+     *
+     * <p>这个重载用于需要预先确定幂等键的可靠消息，例如订单创建事务同时写入“订单事件”和
+     * “延迟超时检查”时，可以先根据订单业务键生成稳定 ID，再把它保存进 Outbox。之后无论调度器
+     * 重试多少次，都恢复并发送同一个 messageId，而不是每次重试生成一个新 ID。</p>
+     */
+    public RocketMessageEnvelope<JsonNode> newEnvelope(String messageId,
+                                                       String eventType,
+                                                       String aggregateId,
+                                                       Object payload) {
         RocketMessageEnvelope<JsonNode> envelope = new RocketMessageEnvelope<>();
-        envelope.setMessageId(UUID.randomUUID().toString());
+        envelope.setMessageId(messageId);
         envelope.setEventType(eventType);
         envelope.setSchemaVersion(RocketMqNames.CURRENT_SCHEMA_VERSION);
         envelope.setAggregateId(aggregateId);
         envelope.setOccurredAt(LocalDateTime.now());
-        envelope.setPayload(objectMapper.valueToTree(payload));
+        envelope.setPayload(jsonMapper.valueToTree(payload));
         validateEnvelope(envelope);
         return envelope;
     }
@@ -76,7 +88,7 @@ public class RocketMessageCodec {
         validateEnvelope(envelope);
         validateSchemaVersion(envelope);
         try {
-            return objectMapper.writeValueAsString(envelope);
+            return jsonMapper.writeValueAsString(envelope);
         } catch (Exception e) {
             throw new MessageDecodingException("RocketMQ消息JSON序列化失败", e);
         }
@@ -84,14 +96,12 @@ public class RocketMessageCodec {
 
     private RocketMessageEnvelope<JsonNode> decodeBytes(byte[] body, String errorMessage) {
         try {
-            RocketMessageEnvelope<JsonNode> envelope = objectMapper.readValue(
+            RocketMessageEnvelope<JsonNode> envelope = jsonMapper.readValue(
                     body,
-                    objectMapper.getTypeFactory().constructParametricType(RocketMessageEnvelope.class, JsonNode.class));
+                    jsonMapper.getTypeFactory().constructParametricType(RocketMessageEnvelope.class, JsonNode.class));
             validateEnvelope(envelope);
             validateSchemaVersion(envelope);
             return envelope;
-        } catch (UnsupportedMessageVersionException e) {
-            throw e;
         } catch (MessageDecodingException e) {
             throw e;
         } catch (Exception e) {
@@ -119,7 +129,7 @@ public class RocketMessageCodec {
 
     private void validateSchemaVersion(RocketMessageEnvelope<?> envelope) {
         if (envelope.getSchemaVersion() != RocketMqNames.CURRENT_SCHEMA_VERSION) {
-            throw new UnsupportedMessageVersionException(
+            throw new MessageDecodingException(
                     "不支持的消息版本: " + envelope.getSchemaVersion()
                             + "，当前仅支持: " + RocketMqNames.CURRENT_SCHEMA_VERSION);
         }

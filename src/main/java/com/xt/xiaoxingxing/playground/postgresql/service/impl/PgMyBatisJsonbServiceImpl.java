@@ -1,6 +1,5 @@
 package com.xt.xiaoxingxing.playground.postgresql.service.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileAttributesMergeRequest;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileCreateRequest;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileSearchRequest;
@@ -13,6 +12,7 @@ import com.xt.xiaoxingxing.shared.validation.BusinessAssert;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 

@@ -3,11 +3,6 @@ package com.xt.xiaoxingxing.playground.postgresql.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileAttributesMergeRequest;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileCreateRequest;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileSearchRequest;
@@ -20,6 +15,11 @@ import com.xt.xiaoxingxing.shared.validation.BusinessAssert;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.List;
 
@@ -34,10 +34,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class PgMyBatisPlusJsonbServiceImpl implements PgJsonbService {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
     private final PgProductProfilePlusMapper profileMapper;
     private final PgProductPlusMapper productMapper;
+    /** 复用 Spring Boot 4 自动配置的 Jackson 3 JsonMapper，保持 HTTP 与业务 JSON 行为一致。 */
+    private final JsonMapper jsonMapper;
 
     @Override
     public Long create(ProductProfileCreateRequest request) {
@@ -225,7 +225,7 @@ public class PgMyBatisPlusJsonbServiceImpl implements PgJsonbService {
     }
 
     private String buildTagContainmentJson(String tag) {
-        ObjectNode root = OBJECT_MAPPER.createObjectNode();
+        ObjectNode root = jsonMapper.createObjectNode();
         ArrayNode tags = root.putArray("tags");
         tags.add(tag);
         return writeJson(root);
@@ -233,8 +233,8 @@ public class PgMyBatisPlusJsonbServiceImpl implements PgJsonbService {
 
     private String writeJson(JsonNode value) {
         try {
-            return OBJECT_MAPPER.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
+            return jsonMapper.writeValueAsString(value);
+        } catch (JacksonException ex) {
             throw new BusinessException("JSON序列化失败");
         }
     }

@@ -16,22 +16,16 @@ public class MqOutboxEvent {
 
     /** 应用预先生成的稳定消息 ID；重试时不变，便于消费者去重和人工追踪。 */
     private String id;
-    /** 业务聚合类型，例如 ORDER。 */
-    private String aggregateType;
-    /** 聚合主键的字符串形式，避免把数据库主键类型泄漏给消息协议。 */
+    /** 聚合主键的字符串形式；当前学习案例只保存订单 ID。 */
     private String aggregateId;
     /** 领域事件类型，例如 ORDER_CREATED。 */
     private String eventType;
-    /** 消息信封版本，不是数据库乐观锁版本，也不是订单状态。 */
-    private Integer schemaVersion;
     /** RocketMQ Topic：一类消息的一级分类，例如订单领域事件。 */
     private String topicName;
     /** RocketMQ Tag：Topic 内的二级过滤标识。 */
     private String messageTag;
     /** RocketMQ Key：供 Broker/Dashboard 查询的稳定业务检索键。 */
     private String messageKey;
-    /** FIFO 消息组；普通或延迟消息可为空。 */
-    private String messageGroup;
     /** 期望投递时间；延迟 Topic 发布时由发布器据此计算剩余延迟。 */
     private LocalDateTime deliverAt;
     /** 完整版本化消息信封的 JSON 文本，Mapper 写入时显式转换为 JSONB。 */

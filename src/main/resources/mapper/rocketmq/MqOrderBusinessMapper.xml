@@ -14,6 +14,35 @@
     </select>
 
     <!--
+        orderNo 是订单跨系统稳定业务键。通用事务记录不再保存订单表主键，因此提交结果不明确时，
+        OrderService 使用 businessKey=orderNo 重新读取已经提交的真实订单事实。
+    -->
+    <select id="selectOrderByOrderNo" resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgOrder">
+        SELECT id,
+               user_id AS userId,
+               order_no AS orderNo,
+               total_amount AS totalAmount,
+               status,
+               created_at AS createdAt
+        FROM orders
+        WHERE order_no = #{orderNo}
+    </select>
+
+    <!--
+        商品缓存只保存查询快照，数据库始终是价格与库存的权威来源。
+        下单仍会重新查询数据库并使用带 stock 条件的 UPDATE，绝不能拿缓存库存直接扣减。
+    -->
+    <select id="selectProductById"
+            resultType="com.xt.xiaoxingxing.playground.postgresql.entity.PgProduct">
+        SELECT id,
+               name,
+               price,
+               stock
+        FROM products
+        WHERE id = #{productId}
+    </select>
+
+    <!--
         状态判断与更新必须位于同一条 SQL。支付与延迟取消并发时，至多一方影响 1 行；
         返回 0 不必然是异常，表示订单已经被另一方推进到 PAID/CANCELLED 或订单不存在。
     -->

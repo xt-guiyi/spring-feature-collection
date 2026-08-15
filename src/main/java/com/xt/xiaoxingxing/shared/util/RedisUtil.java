@@ -1,7 +1,5 @@
 package com.xt.xiaoxingxing.shared.util;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.Metric;
@@ -13,6 +11,8 @@ import org.springframework.data.redis.connection.stream.StreamOffset;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.Collection;
 import java.util.List;
@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 public class RedisUtil {
 
     private final StringRedisTemplate stringRedisTemplate;
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
     /**
      * 设置字符串值
@@ -97,9 +97,11 @@ public class RedisUtil {
      */
     public void setObject(String key, Object value) {
         try {
-            String json = objectMapper.writeValueAsString(value);
+            String json = jsonMapper.writeValueAsString(value);
             stringRedisTemplate.opsForValue().set(key, json);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
+            // Jackson 3 将读写、映射等 JSON 异常统一到 JacksonException；保留原异常作为 cause，
+            // 既让调用方看到明确的 Redis 业务边界，也不会丢失具体字段或类型错误的诊断信息。
             throw new RuntimeException("Redis 对象序列化失败", e);
         }
     }
@@ -115,8 +117,10 @@ public class RedisUtil {
     public <T> T getObject(String key, Class<T> clazz) {
         try {
             String json = stringRedisTemplate.opsForValue().get(key);
-            return objectMapper.readValue(json, clazz);
-        } catch (JsonProcessingException e) {
+            return jsonMapper.readValue(json, clazz);
+        } catch (JacksonException e) {
+            // 只收口 JSON 协议错误；Redis 连接异常仍由 Spring Data Redis 原样向上抛出，
+            // 避免把“缓存不可达”和“缓存内容损坏”错误地包装成同一种原因。
             throw new RuntimeException("Redis 对象反序列化失败", e);
         }
     }

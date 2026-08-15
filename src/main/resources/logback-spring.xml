@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <!--
+        %clr(...) 不是 Logback 原生语法，而是 Spring Boot 提供的颜色转换器。
+        spring.output.ansi.enabled 决定是否真正输出 ANSI 颜色码；具体配色仍由 YAML Pattern 决定。
+    -->
+    <conversionRule conversionWord="clr" class="org.springframework.boot.logging.logback.ColorConverter"/>
+
+    <!--
         日志格式与根级别属于运行配置：开发环境可更详细、生产环境可更克制。
         springProperty 从 application*.yaml 的 logging.pattern.console / logging.level.root 读取，
         因此 XML 只保留日志结构，不再固化任何环境值。

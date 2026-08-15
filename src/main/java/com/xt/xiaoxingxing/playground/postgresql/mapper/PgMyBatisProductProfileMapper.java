@@ -1,10 +1,10 @@
 package com.xt.xiaoxingxing.playground.postgresql.mapper;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.xt.xiaoxingxing.playground.postgresql.dto.request.ProductProfileSearchRequest;
 import com.xt.xiaoxingxing.playground.postgresql.entity.PgProductProfile;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 

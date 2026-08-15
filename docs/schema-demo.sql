@@ -1,8 +1,7 @@
 -- 1. 全量重建当前学习项目结构
 -- 注意：这不是生产环境的增量迁移脚本。执行后会先删除当前案例表及其数据，再按照最新结构重新创建。
--- 表之间使用逻辑关联 ID，不定义 FOREIGN KEY，因此按依赖顺序删除即可，无需使用 CASCADE。
-DROP TABLE IF EXISTS mq_notification_log;
-DROP TABLE IF EXISTS mq_order_statistics;
+-- 表之间使用逻辑关联 ID，不定义数据库级外键约束，因此按依赖顺序删除即可，无需使用 CASCADE。
+DROP TABLE IF EXISTS order_statistics;
 DROP TABLE IF EXISTS mq_consumed_message;
 DROP TABLE IF EXISTS mq_transaction_record;
 DROP TABLE IF EXISTS mq_outbox_event;
@@ -13,7 +12,7 @@ DROP TABLE IF EXISTS product_profiles;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS users;
 
--- 2. 创建新表（逻辑外键，不带 FOREIGN KEY 约束）
+-- 2. 创建新表（只保存逻辑关联 ID，不带数据库级外键约束）
 
 -- 用户表
 CREATE TABLE users (
@@ -92,7 +91,7 @@ COMMENT ON COLUMN products.price IS '商品当前价格：精确到两位小数�
 COMMENT ON COLUMN products.stock IS '商品当前库存：可为空且不能为负；并发扣减时应使用带 stock >= quantity 条件的原子 UPDATE。';
 
 -- 商品动态扩展信息：稳定的价格、库存仍使用普通列，只有不同品类结构不一致的规格放入 JSONB。
--- product_id 继续遵循本 playground 的“逻辑外键”约定，不增加数据库 FOREIGN KEY。
+-- product_id 继续遵循本 playground 的“逻辑关联”约定，不增加数据库级外键约束。
 CREATE TABLE product_profiles (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL UNIQUE,
@@ -140,23 +139,15 @@ COMMENT ON COLUMN order_products.product_id IS '商品 ID：逻辑关联 product
 COMMENT ON COLUMN order_products.quantity IS '购买数量：必须大于 0；与 unit_price 相乘可计算该明细的成交小计。';
 COMMENT ON COLUMN order_products.unit_price IS '成交单价快照：必须大于等于 0，保存下单当时价格，不能在查询历史订单时改用 products.price。';
 
--- RocketMQ Transactional Outbox：订单和待发送事件处于同一个 PostgreSQL 本地事务。
--- 本表只保存待发布事实；发布器采用 FOR UPDATE SKIP LOCKED 原子领取，消费者仍需幂等。
+-- RocketMQ Transactional Outbox：订单事实和待发布事件处于同一个 PostgreSQL 本地事务。
+-- 表中只保存发布器真正读取的字段；消息协议版本保存在 payload 信封内，不重复维护第二份列。
 CREATE TABLE mq_outbox_event (
     id VARCHAR(36) PRIMARY KEY,
-    aggregate_type VARCHAR(50) NOT NULL,
     aggregate_id VARCHAR(100) NOT NULL,
     event_type VARCHAR(100) NOT NULL,
-    schema_version INT NOT NULL,
-    -- Topic 是 RocketMQ 一级消息分类，例如订单事件 Topic。
     topic_name VARCHAR(200) NOT NULL,
-    -- Tag 在 Topic 内过滤消息，消费者订阅表达式基于它选择事件类型。
     message_tag VARCHAR(100) NOT NULL,
-    -- 稳定业务查询键；同一次 Outbox 重试不得改变。
     message_key VARCHAR(200) NOT NULL,
-    -- FIFO 消息的组键；普通和延迟消息可为空。
-    message_group VARCHAR(200),
-    -- 延迟消息目标投递时间，发布器计算剩余延迟后交给 RocketMQ。
     deliver_at TIMESTAMP,
     payload JSONB NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
@@ -166,36 +157,34 @@ CREATE TABLE mq_outbox_event (
     last_error VARCHAR(1000),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMP,
-    CONSTRAINT ck_mq_outbox_status CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'PUBLISHED', 'DEAD')),
+    CONSTRAINT ck_mq_outbox_status
+        CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'PUBLISHED', 'DEAD')),
     CONSTRAINT ck_mq_outbox_retry_count CHECK (retry_count >= 0)
 );
 
-COMMENT ON TABLE mq_outbox_event IS 'RocketMQ Outbox 事件表：业务事务先同时写订单和待发送事件，后台发布器再可靠投递，解决数据库提交成功但消息未发送的问题。';
-COMMENT ON COLUMN mq_outbox_event.id IS 'Outbox 事件主键：应用生成 UUID；同一条事件重试发布时必须保持不变。';
-COMMENT ON COLUMN mq_outbox_event.aggregate_type IS '聚合根类型：标识事件属于哪类业务对象，例如 ORDER，便于按业务聚合查询和排查。';
-COMMENT ON COLUMN mq_outbox_event.aggregate_id IS '聚合根 ID：保存订单 ID 等业务对象标识，与 aggregate_type 共同定位事件来源。';
-COMMENT ON COLUMN mq_outbox_event.event_type IS '事件类型：例如 OrderCreated；消费者据此选择处理逻辑，语义变更时应配合 schema_version 演进。';
-COMMENT ON COLUMN mq_outbox_event.schema_version IS '消息结构版本：用于消费者兼容不同版本的 payload，不能把它误当作数据库乐观锁版本。';
-COMMENT ON COLUMN mq_outbox_event.topic_name IS 'RocketMQ Topic 名称：一级消息分类，由发布器把事件发送到该 Topic。';
-COMMENT ON COLUMN mq_outbox_event.message_tag IS 'RocketMQ Tag：Topic 内的二级业务分类，消费者可通过订阅表达式过滤事件。';
-COMMENT ON COLUMN mq_outbox_event.message_key IS 'RocketMQ 消息业务键：用于控制台查询和问题追踪；同一 Outbox 事件重试时保持稳定。';
-COMMENT ON COLUMN mq_outbox_event.message_group IS '顺序消息组键：同一组消息发送到同一队列以维持局部顺序；普通消息和延迟消息可以为空。';
-COMMENT ON COLUMN mq_outbox_event.deliver_at IS '计划投递时间：为空表示尽快发送；非空时发布器据此计算剩余延迟，适用于订单超时等延迟消息。';
-COMMENT ON COLUMN mq_outbox_event.payload IS '消息正文：JSONB 格式的业务事件快照；应包含消费者完成处理所需的数据，避免消费时反复回查生产者数据库。';
-COMMENT ON COLUMN mq_outbox_event.status IS '发布状态：PENDING 待处理、PROCESSING 已领取、FAILED 可重试、PUBLISHED 已发布、DEAD 超限人工处理。';
-COMMENT ON COLUMN mq_outbox_event.retry_count IS '发布重试次数：只能递增且不能为负，用于退避计算和判断是否进入 DEAD。';
-COMMENT ON COLUMN mq_outbox_event.next_retry_at IS '下次允许发布时间：发布器只领取到期记录，失败后通过推迟该时间实现退避重试。';
-COMMENT ON COLUMN mq_outbox_event.locked_at IS '发布任务领取时间：PROCESSING 记录长时间未完成时，可据此识别进程崩溃造成的超时占用并重新领取。';
-COMMENT ON COLUMN mq_outbox_event.last_error IS '最后一次发布失败原因：用于学习和运维排查，不应写入密码、令牌等敏感信息。';
-COMMENT ON COLUMN mq_outbox_event.created_at IS '事件创建时间：与业务数据在同一本地事务中落库，可用于保证发布领取顺序和追踪积压时长。';
-COMMENT ON COLUMN mq_outbox_event.published_at IS '成功发布时间：只有收到 RocketMQ 成功结果并将状态更新为 PUBLISHED 时填写。';
+COMMENT ON TABLE mq_outbox_event IS 'RocketMQ Outbox事件表：业务事务先同时提交订单事实和消息意图，后台发布器再可靠发送。';
+COMMENT ON COLUMN mq_outbox_event.id IS 'Outbox事件主键，同时是信封内稳定业务messageId；重复发布时保持不变。';
+COMMENT ON COLUMN mq_outbox_event.aggregate_id IS '事件关联的业务对象ID；当前案例保存订单ID的字符串形式，不定义数据库外键。';
+COMMENT ON COLUMN mq_outbox_event.event_type IS '明确业务事件类型：ORDER_CREATED、ORDER_PAID、ORDER_CANCELLED或Outbox超时检查。';
+COMMENT ON COLUMN mq_outbox_event.topic_name IS 'RocketMQ Topic名称；Outbox案例只写NORMAL订单事件Topic或DELAY超时Topic。';
+COMMENT ON COLUMN mq_outbox_event.message_tag IS 'RocketMQ Tag；消费者在Topic内部根据该二级业务分类过滤消息。';
+COMMENT ON COLUMN mq_outbox_event.message_key IS 'RocketMQ查询Key；使用稳定订单号，便于在Dashboard按业务定位消息。';
+COMMENT ON COLUMN mq_outbox_event.deliver_at IS '期望投递时间；普通事件为空，付款超时检查保存未来时间并由发布器计算剩余延迟。';
+COMMENT ON COLUMN mq_outbox_event.payload IS '完整版本化JSON消息信封；包含稳定messageId、eventType、协议版本、聚合ID、时间和业务负载。';
+COMMENT ON COLUMN mq_outbox_event.status IS '发布状态：PENDING待领取、PROCESSING已租赁、FAILED待重试、PUBLISHED已发送、DEAD超限。';
+COMMENT ON COLUMN mq_outbox_event.retry_count IS '发布失败次数；由数据库SQL原子递增，用于退避和DEAD判断。';
+COMMENT ON COLUMN mq_outbox_event.next_retry_at IS '下次允许领取时间；失败后按指数退避推迟，调度器不会提前领取。';
+COMMENT ON COLUMN mq_outbox_event.locked_at IS '本次领取租约时间；成功和失败回写都必须携带相同时间，阻止过期worker覆盖新worker。';
+COMMENT ON COLUMN mq_outbox_event.last_error IS '最近一次发布错误摘要；最长1000字符，不应保存密码、令牌或完整敏感请求。';
+COMMENT ON COLUMN mq_outbox_event.created_at IS '事件写入时间；用于稳定领取顺序、积压诊断和审计。';
+COMMENT ON COLUMN mq_outbox_event.published_at IS '获得Broker发送成功结果并成功回写PUBLISHED的时间。';
 
 CREATE INDEX idx_mq_outbox_publishable
-    ON mq_outbox_event (status, next_retry_at, created_at);
+    ON mq_outbox_event (status, next_retry_at, created_at, id);
 CREATE INDEX idx_mq_outbox_aggregate
-    ON mq_outbox_event (aggregate_type, aggregate_id, created_at);
+    ON mq_outbox_event (aggregate_id, created_at DESC);
 
--- 每个消费者用 (consumer_name, message_id) 唯一键抵挡 RocketMQ 至少一次投递产生的重复消息。
+-- RocketMQ 是至少一次投递；同一消息可能再次到达同一消费组，必须以数据库唯一键最终裁决。
 CREATE TABLE mq_consumed_message (
     id BIGSERIAL PRIMARY KEY,
     consumer_name VARCHAR(100) NOT NULL,
@@ -206,18 +195,19 @@ CREATE TABLE mq_consumed_message (
     CONSTRAINT uk_mq_consumer_message UNIQUE (consumer_name, message_id)
 );
 
-COMMENT ON TABLE mq_consumed_message IS 'RocketMQ 消费幂等记录表：消费者在执行业务副作用前登记消息，利用唯一约束抵挡至少一次投递产生的重复消费。';
-COMMENT ON COLUMN mq_consumed_message.id IS '消费记录主键：由数据库序列自动生成。';
-COMMENT ON COLUMN mq_consumed_message.consumer_name IS '消费者逻辑名称：不同业务消费者可以分别处理同一消息，因此它与 message_id 共同参与唯一约束。';
-COMMENT ON COLUMN mq_consumed_message.message_id IS '消息唯一 ID：对应生产端稳定的事件标识；同一消费者重复收到该 ID 时应跳过业务副作用。';
-COMMENT ON COLUMN mq_consumed_message.event_type IS '已消费事件类型：用于审计消费者处理了哪类消息。';
-COMMENT ON COLUMN mq_consumed_message.aggregate_id IS '事件关联的业务对象 ID：可为空，用于按订单等聚合根定位消费记录。';
-COMMENT ON COLUMN mq_consumed_message.consumed_at IS '成功登记消费的时间：用于审计、排查重复投递和按保留策略清理历史幂等记录。';
+COMMENT ON TABLE mq_consumed_message IS 'RocketMQ消费幂等记录表：不同消费组分别登记同一消息，同组重复投递只能首次取得处理权。';
+COMMENT ON COLUMN mq_consumed_message.id IS '消费记录主键；由PostgreSQL序列生成，仅作为数据库内部标识。';
+COMMENT ON COLUMN mq_consumed_message.consumer_name IS '消费者逻辑名称；本案例使用ConsumerGroup名称，使两套方案和不同副作用拥有独立幂等维度。';
+COMMENT ON COLUMN mq_consumed_message.message_id IS '应用生成的稳定业务messageId；不是Broker每次投递尝试的临时标识。';
+COMMENT ON COLUMN mq_consumed_message.event_type IS '已处理的业务事件类型；用于核对创建、支付、取消和超时调度记录。';
+COMMENT ON COLUMN mq_consumed_message.aggregate_id IS '消费职责记录的业务聚合键；缓存和统计保存订单ID字符串，事务超时调度保存CREATE订单号，只作逻辑关联和排查。';
+COMMENT ON COLUMN mq_consumed_message.consumed_at IS '消费者首次成功领取该幂等键的时间；业务事务回滚时本记录也随之回滚。';
 
 CREATE INDEX idx_mq_consumed_time
     ON mq_consumed_message (consumed_at DESC, id DESC);
 
-CREATE TABLE mq_order_statistics (
+-- 缓存删除不需要单独数据库投影；订单统计则用单例行演示“幂等记录+业务UPSERT”同事务。
+CREATE TABLE order_statistics (
     id SMALLINT PRIMARY KEY,
     created_count BIGINT NOT NULL DEFAULT 0,
     paid_count BIGINT NOT NULL DEFAULT 0,
@@ -225,76 +215,58 @@ CREATE TABLE mq_order_statistics (
     created_amount DECIMAL(18, 2) NOT NULL DEFAULT 0,
     last_event_at TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_mq_order_statistics_singleton CHECK (id = 1)
+    CONSTRAINT ck_order_statistics_singleton CHECK (id = 1)
 );
 
-COMMENT ON TABLE mq_order_statistics IS '订单消息统计汇总表：消费者根据订单事件增量更新的一行物化统计；它是学习投影，不是订单事实数据源。';
-COMMENT ON COLUMN mq_order_statistics.id IS '单例主键：CHECK 强制只能取 1，使整张表最多维护一个全局汇总逻辑行。';
-COMMENT ON COLUMN mq_order_statistics.created_count IS '已处理的订单创建事件数量：默认 0，幂等控制成功后才能累加。';
-COMMENT ON COLUMN mq_order_statistics.paid_count IS '已处理的订单支付事件数量：默认 0，不能用重复消息反复累加。';
-COMMENT ON COLUMN mq_order_statistics.cancelled_count IS '已处理的订单取消事件数量：默认 0，用于演示事件驱动统计。';
-COMMENT ON COLUMN mq_order_statistics.created_amount IS '订单创建金额累计值：默认 0，使用 DECIMAL 避免浮点金额误差。';
-COMMENT ON COLUMN mq_order_statistics.last_event_at IS '最近一次参与统计的业务事件时间：可用于判断统计投影的新鲜度。';
-COMMENT ON COLUMN mq_order_statistics.updated_at IS '统计行最后更新时间：每次增量更新时需要显式刷新，默认值只负责首次创建。';
+COMMENT ON TABLE order_statistics IS '订单统计投影表：由消息消费驱动，两套可靠消息方案的统计消费组都更新这一行，但各自先做组内幂等。';
+COMMENT ON COLUMN order_statistics.id IS '单例主键；CHECK限制只能为1，使整表只维护一行全局学习统计。';
+COMMENT ON COLUMN order_statistics.created_count IS '成功处理的ORDER_CREATED数量；重复投递不得再次累计。';
+COMMENT ON COLUMN order_statistics.paid_count IS '成功处理的ORDER_PAID数量；支付不会触发商品缓存删除，但会进入统计。';
+COMMENT ON COLUMN order_statistics.cancelled_count IS '成功处理的ORDER_CANCELLED数量；取消事件同时会让缓存组删除商品缓存。';
+COMMENT ON COLUMN order_statistics.created_amount IS '创建订单事件的金额累计值；使用DECIMAL避免浮点金额误差。';
+COMMENT ON COLUMN order_statistics.last_event_at IS '最近一次成功统计事件的消费时间；用于观察统计投影推进到的处理时间。';
+COMMENT ON COLUMN order_statistics.updated_at IS '统计行最近一次UPSERT时间；表示投影更新时间而不是订单事实更新时间。';
 
-CREATE TABLE mq_notification_log (
-    id BIGSERIAL PRIMARY KEY,
-    message_id VARCHAR(36) NOT NULL,
-    order_id BIGINT,
-    event_type VARCHAR(100) NOT NULL,
-    channel VARCHAR(30) NOT NULL,
-    status VARCHAR(20) NOT NULL,
-    content VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_mq_notification_message_channel UNIQUE (message_id, channel)
-);
-
-COMMENT ON TABLE mq_notification_log IS '消息通知模拟日志表：记录订单事件触发的短信、邮件等通知结果，并通过消息与渠道唯一组合避免重复发送。';
-COMMENT ON COLUMN mq_notification_log.id IS '通知日志主键：由数据库序列自动生成。';
-COMMENT ON COLUMN mq_notification_log.message_id IS '触发通知的消息 ID：与 channel 组成唯一约束，防止同一消息在同一渠道重复产生副作用。';
-COMMENT ON COLUMN mq_notification_log.order_id IS '关联订单 ID：逻辑关联 orders.id，可为空以容纳无法解析订单的异常记录。';
-COMMENT ON COLUMN mq_notification_log.event_type IS '触发通知的事件类型：用于解释为什么产生该通知。';
-COMMENT ON COLUMN mq_notification_log.channel IS '通知渠道：例如 SMS、EMAIL；同一消息允许在不同渠道分别通知。';
-COMMENT ON COLUMN mq_notification_log.status IS '通知执行状态：记录模拟发送成功或失败结果，具体合法值和流转由业务层约束。';
-COMMENT ON COLUMN mq_notification_log.content IS '通知内容快照：保存当时实际准备发送的文本，便于审计；真实系统应避免写入敏感数据。';
-COMMENT ON COLUMN mq_notification_log.created_at IS '通知日志创建时间：默认使用数据库当前时间，用于按订单查看通知时间线。';
-
-CREATE INDEX idx_mq_notification_order
-    ON mq_notification_log (order_id, created_at DESC);
-
--- RocketMQ 事务消息回查依据：半消息先插 PREPARED，本地订单事务成功时更新为 COMMITTED。
--- 回查不得相信内存状态；只有进行中/已提交记录占用 business_key，已回滚命令允许受控重试。
+-- RocketMQ事务消息的通用持久回查依据。表结构只表达协调语义，不绑定订单等具体业务领域。
 CREATE TABLE mq_transaction_record (
     transaction_id VARCHAR(36) PRIMARY KEY,
+    business_type VARCHAR(50) NOT NULL,
     business_key VARCHAR(100) NOT NULL,
-    request_payload JSONB NOT NULL,
+    operation_type VARCHAR(50) NOT NULL,
     status VARCHAR(20) NOT NULL,
-    order_id BIGINT,
     last_error VARCHAR(1000),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_mq_transaction_status
-        CHECK (status IN ('PREPARED', 'COMMITTED', 'ROLLED_BACK'))
+        CHECK (status IN ('PREPARED', 'COMMITTED', 'ROLLED_BACK')),
+    CONSTRAINT ck_mq_transaction_id_not_blank
+        CHECK (BTRIM(transaction_id) <> ''),
+    CONSTRAINT ck_mq_transaction_business_type_not_blank
+        CHECK (BTRIM(business_type) <> ''),
+    CONSTRAINT ck_mq_transaction_business_key_not_blank
+        CHECK (BTRIM(business_key) <> ''),
+    CONSTRAINT ck_mq_transaction_operation_type_not_blank
+        CHECK (BTRIM(operation_type) <> '')
 );
 
-COMMENT ON TABLE mq_transaction_record IS 'RocketMQ 事务消息本地事务记录表：持久化半消息对应的业务执行状态，为 Broker 事务回查提供可信依据。';
-COMMENT ON COLUMN mq_transaction_record.transaction_id IS '事务消息 ID：应用生成 UUID，用于关联半消息、本地事务执行和 Broker 回查。';
-COMMENT ON COLUMN mq_transaction_record.business_key IS '业务幂等键：例如订单号；进行中或已提交记录通过部分唯一索引占用该键，防止并发重复创建。';
-COMMENT ON COLUMN mq_transaction_record.request_payload IS '原始业务请求快照：JSONB 格式，用于事务执行审计和问题排查，不应存放明文密码等秘密。';
-COMMENT ON COLUMN mq_transaction_record.status IS '本地事务状态：PREPARED 执行中、COMMITTED 已提交、ROLLED_BACK 已回滚；Broker 回查据此决定提交或回滚半消息。';
-COMMENT ON COLUMN mq_transaction_record.order_id IS '本地事务创建的订单 ID：提交成功后填写，逻辑关联 orders.id；回滚时可以为空。';
-COMMENT ON COLUMN mq_transaction_record.last_error IS '本地事务最后一次失败原因：回滚和排错使用，不应记录敏感凭据。';
-COMMENT ON COLUMN mq_transaction_record.created_at IS '事务记录创建时间：首次收到事务消息时写入，用于识别长时间停留在 PREPARED 的记录。';
-COMMENT ON COLUMN mq_transaction_record.updated_at IS '事务状态最后更新时间：状态变化时需要显式刷新，Broker 回查可据此辅助判断处理时效。';
+COMMENT ON TABLE mq_transaction_record IS 'RocketMQ通用事务消息记录表：持久化半消息对应的本地事务状态，供Broker回查和孤儿PREPARED清理，不绑定特定业务领域。';
+COMMENT ON COLUMN mq_transaction_record.transaction_id IS '应用生成的稳定UUID：既是事务记录主键，也是消息信封messageId；Broker回查直接使用该值，不另存重复消息ID。';
+COMMENT ON COLUMN mq_transaction_record.business_type IS '业务类型：由调用方协议定义，例如ORDER或INVENTORY；基础设施只校验非空白，不限制具体枚举。';
+COMMENT ON COLUMN mq_transaction_record.business_key IS '稳定业务键：例如订单号、退款单号或库存预占号；与业务类型和操作类型共同标识一次受控业务操作。';
+COMMENT ON COLUMN mq_transaction_record.operation_type IS '本次本地业务操作类型：由调用方协议定义；基础设施只校验非空白，不限制CREATE等具体枚举。';
+COMMENT ON COLUMN mq_transaction_record.status IS '事务状态：PREPARED等待裁决、COMMITTED本地业务事实已提交、ROLLED_BACK已明确回滚。';
+COMMENT ON COLUMN mq_transaction_record.last_error IS '明确回滚的错误摘要；不确定提交结果不能据此猜测终态，应继续依据status回查。';
+COMMENT ON COLUMN mq_transaction_record.created_at IS 'PREPARED记录创建时间；用于识别半消息发送前崩溃留下的过期孤儿记录。';
+COMMENT ON COLUMN mq_transaction_record.updated_at IS '事务状态最后更新时间；COMMITTED或ROLLED_BACK条件更新时由数据库刷新。';
 
--- PostgreSQL 部分唯一索引将“业务键占用权”与持久状态绑定：
--- PREPARED/COMMITTED 拒绝同 orderNo 并发重复，ROLLED_BACK 不占用键，可以使用新 transactionId 重试。
-CREATE UNIQUE INDEX uk_mq_transaction_active_business_key
-    ON mq_transaction_record (business_key)
+-- 只有PREPARED/COMMITTED占用业务键；ROLLED_BACK保留审计，但允许使用新transactionId受控重试。
+CREATE UNIQUE INDEX uk_mq_transaction_active_business_operation
+    ON mq_transaction_record (business_type, business_key, operation_type)
     WHERE status IN ('PREPARED', 'COMMITTED');
-
+CREATE INDEX idx_mq_transaction_business_lookup
+    ON mq_transaction_record (business_type, business_key, status, created_at DESC);
 CREATE INDEX idx_mq_transaction_status_created
-    ON mq_transaction_record (status, created_at DESC);
+    ON mq_transaction_record (status, created_at, transaction_id);
 
 -- 3. 插入示例数据
 

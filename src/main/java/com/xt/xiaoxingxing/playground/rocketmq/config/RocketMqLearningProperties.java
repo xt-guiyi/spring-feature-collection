@@ -12,90 +12,153 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 /**
- * RocketMQ 学习案例的业务参数。
+ * RocketMQ 可靠订单案例的全部运行配置。
  *
- * <p>本类是学习模块所有<strong>运行名称和运行参数</strong>的唯一入口：Topic、Tag、消费组、
- * 消费端并发参数、Outbox 轮询和事务清理节奏都必须在 YAML 中声明，不能再在 Java 中写默认值。
- * 这样切换环境时，可以一眼区分“代码协议”（事件类型、JSON 版本）与“部署参数”。</p>
- *
- * <p>注意：YAML 只能告诉客户端“使用哪个 Topic 名称”，不能创建或改变 Topic 的普通/顺序/延迟/
- * 事务类型；Topic 元数据仍由 Broker 管理。改动 {@link Topics} 名称时，必须同步 Docker 的 Topic
- * 初始化脚本。</p>
+ * <p>Java 类只声明配置结构和合法性，不提供任何运行默认值。Topic、Tag、ConsumerGroup、订阅表达式和
+ * 重试节奏都必须在 application YAML 中显式出现；这样阅读代码时不会同时寻找“Java 默认值”和
+ * “YAML 覆盖值”两套来源。</p>
  */
 @Data
 @Validated
 @ConfigurationProperties(prefix = "playground.rocketmq")
 public class RocketMqLearningProperties {
 
-    /** 只控制本模块后台 Listener 与调度器，不影响 Controller Bean 的注册。 */
+    /** 关闭时不启动 RocketMQ 后台监听和调度任务。 */
     @NotNull
     private Boolean enabled;
 
-    /** 5.x gRPC Client 应连接 Proxy 的 endpoints，不直接把 NameServer 暴露给应用。 */
+    /** RocketMQ 5.x Client 连接 Proxy 的 gRPC endpoints。 */
     @NotBlank
     private String endpoints;
 
-    /** 订单创建后多久发送延迟检查；最终是否取消仍由数据库条件更新决定。 */
+    /** 创建订单后等待多久执行付款超时检查。 */
     @Positive
     private long orderTimeoutMillis;
 
-    /**
-     * PREPARED 事务记录在此窗口内可返回 UNKNOWN，避免过早回滚仍在执行的本地事务。
-     *
-     * <p>该值必须大于“正常本地事务的最坏执行时间”（包括数据库锁等待），否则 checker 或
-     * 主动清理器可以合法先抢占 ROLLED_BACK，使本来只是较慢的订单事务整体回滚。</p>
-     */
+    /** PREPARED 事务在此保护窗口内由 Broker 回查时返回 UNKNOWN。 */
     @Positive
     private long transactionPreparedTimeoutSeconds;
 
-    /**
-     * 每轮主动收口最多扫描的过期 PREPARED 数量。
-     *
-     * <p>限制批量是为了避免历史堆积在一轮调度中长时间占用数据库；每条记录仍使用
-     * 独立的条件更新裁决，它不是一个“批量强制回滚”开关。</p>
-     */
+    /** 每轮最多收口多少条过期 PREPARED 事务记录。 */
     @Positive
     @Max(1000)
     private int transactionCleanupBatchSize;
 
-    /** Broker 可见的 Topic 名称；类型（普通/FIFO/延迟/事务）由 Broker 预先创建时决定。 */
     @Valid
     @NotNull
-    private Topics topics = new Topics();
-
-    /** Topic 内的二级路由标签；改名会影响 Producer 和 Listener 的订阅契约。 */
-    @Valid
-    @NotNull
-    private Tags tags = new Tags();
-
-    /** 每个监听器的稳定消费组名称；组名变更意味着新的消费进度和新的幂等维度。 */
-    @Valid
-    @NotNull
-    private ConsumerGroups consumerGroups = new ConsumerGroups();
-
-    /** 官方 v5 Listener 注解中的消费端运行参数，由 AnnotationEnhancer 写入注解属性。 */
-    @Valid
-    @NotNull
-    private Consumer consumer = new Consumer();
-
-    /** PREPARED 孤儿事务的主动扫描节奏。 */
-    @Valid
-    @NotNull
-    private TransactionCleanup transactionCleanup = new TransactionCleanup();
+    private Topics topics;
 
     @Valid
     @NotNull
-    private Outbox outbox = new Outbox();
+    private Tags tags;
+
+    @Valid
+    @NotNull
+    private ConsumerGroups consumerGroups;
+
+    @Valid
+    @NotNull
+    private Subscriptions subscriptions;
+
+    @Valid
+    @NotNull
+    private Consumer consumer;
+
+    /** 两套订单链路共用的延迟消息边界配置。 */
+    @Valid
+    @NotNull
+    private Delay delay;
+
+    /** 商品库存 Cache Aside 查询使用的 Redis 配置。 */
+    @Valid
+    @NotNull
+    private ProductCache productCache;
+
+    @Valid
+    @NotNull
+    private TransactionCleanup transactionCleanup;
+
+    @Valid
+    @NotNull
+    private Outbox outbox;
+
+    /** 商品库存缓存只受扣库存和恢复库存影响；支付不改变商品库存，因此不订阅支付事件。 */
+    @AssertTrue(message = "RocketMQ subscriptions.cache-events 必须精确包含 order-created、order-cancelled")
+    public boolean isCacheEventsSubscriptionValid() {
+        if (tags == null || subscriptions == null) {
+            return true;
+        }
+        return subscriptionMatches(subscriptions.getCacheEvents(),
+                tags.getOrderCreated(), tags.getOrderCancelled());
+    }
+
+    /** 统计组关注创建、支付、取消三种事实；它比只关心库存变化的缓存组多订阅支付事件。 */
+    @AssertTrue(message = "RocketMQ subscriptions.statistics-events 必须精确包含 order-created、order-paid、order-cancelled")
+    public boolean isStatisticsEventsSubscriptionValid() {
+        if (tags == null || subscriptions == null) {
+            return true;
+        }
+        return subscriptionMatches(subscriptions.getStatisticsEvents(),
+                tags.getOrderCreated(), tags.getOrderPaid(), tags.getOrderCancelled());
+    }
+
+    /** 单个 Tag 不能伪装成组合订阅表达式，也不能含首尾空格。 */
+    @AssertTrue(message = "RocketMQ 单个 Tag 不能重复、包含 || 或带首尾空白")
+    public boolean isTagConfigurationValid() {
+        if (tags == null) {
+            return true;
+        }
+        String[] values = {
+                tags.getOrderCreated(), tags.getOrderPaid(), tags.getOrderCancelled(),
+                tags.getOutboxTimeout(), tags.getTransactionTimeout()
+        };
+        if (Arrays.stream(values).anyMatch(this::isMissing)) {
+            return true;
+        }
+        boolean syntaxValid = Arrays.stream(values)
+                .allMatch(tag -> tag.equals(tag.trim()) && !tag.contains("||"));
+        return syntaxValid && new HashSet<>(Arrays.asList(values)).size() == values.length;
+    }
+
+    private boolean subscriptionMatches(String expression, String... expectedTags) {
+        if (isMissing(expression) || Arrays.stream(expectedTags).anyMatch(this::isMissing)) {
+            return true;
+        }
+        Set<String> actual = parseSubscription(expression);
+        Set<String> expected = new HashSet<>(Arrays.asList(expectedTags));
+        return actual != null && expected.size() == expectedTags.length && actual.equals(expected);
+    }
+
+    private Set<String> parseSubscription(String expression) {
+        Set<String> tags = new LinkedHashSet<>();
+        for (String token : expression.split("\\|\\|", -1)) {
+            String tag = token.trim();
+            if (tag.isEmpty() || !tags.add(tag)) {
+                return null;
+            }
+        }
+        return tags;
+    }
+
+    private boolean isMissing(String value) {
+        return value == null || value.isBlank();
+    }
 
     @Data
     public static class Topics {
+        /** 普通订单事实事件 Topic。 */
         @NotBlank
         private String normal;
-        @NotBlank
-        private String fifo;
+        /** 两套订单实现共用的延迟检查 Topic，通过 Tag 隔离。 */
         @NotBlank
         private String delay;
+        /** RocketMQ 事务半消息 Topic。 */
         @NotBlank
         private String transaction;
     }
@@ -103,50 +166,52 @@ public class RocketMqLearningProperties {
     @Data
     public static class Tags {
         @NotBlank
-        private String demo;
-        @NotBlank
-        private String retry;
-        @NotBlank
         private String orderCreated;
         @NotBlank
         private String orderPaid;
         @NotBlank
         private String orderCancelled;
+        /** Outbox 下单流程的付款超时检查。 */
         @NotBlank
-        private String orderTimeout;
+        private String outboxTimeout;
+        /** RocketMQ 事务消息下单流程的付款超时检查。 */
+        @NotBlank
+        private String transactionTimeout;
     }
 
     @Data
     public static class ConsumerGroups {
         @NotBlank
-        private String normalDemo;
+        private String outboxOrderCache;
         @NotBlank
-        private String broadcastAudit;
+        private String outboxOrderStatistics;
         @NotBlank
-        private String broadcastNotification;
+        private String outboxOrderTimeout;
         @NotBlank
-        private String fifoDemo;
+        private String transactionOrderCache;
         @NotBlank
-        private String delayDemo;
+        private String transactionOrderStatistics;
         @NotBlank
-        private String retryDemo;
+        private String transactionTimeoutScheduler;
         @NotBlank
-        private String orderCache;
+        private String transactionOrderTimeout;
+    }
+
+    @Data
+    public static class Subscriptions {
+        /** ORDER_CREATED || ORDER_CANCELLED。 */
         @NotBlank
-        private String orderStatistics;
+        private String cacheEvents;
+        /** ORDER_CREATED || ORDER_PAID || ORDER_CANCELLED。 */
         @NotBlank
-        private String orderNotification;
-        @NotBlank
-        private String orderTimeout;
-        @NotBlank
-        private String transactionOrder;
+        private String statisticsEvents;
     }
 
     @Data
     public static class Consumer {
         @NotNull
         private Boolean sslEnabled;
-        /** 官方 Starter 的单位为秒，最终会构造成 {@code Duration.ofSeconds(requestTimeout)}。 */
+        /** 官方 Starter 的单位为秒。 */
         @Positive
         private int requestTimeout;
         @Positive
@@ -156,23 +221,19 @@ public class RocketMqLearningProperties {
         @Positive
         private int consumptionThreadCount;
         @NotBlank
-        @Pattern(regexp = "(?i)tag", message = "本学习模块使用 Tag 订阅，filter-expression-type 只能配置为 tag")
+        @Pattern(regexp = "(?i)tag", message = "本案例只使用 Tag 订阅")
         private String filterExpressionType;
-        /** 无 namespace 的本地部署允许显式配置为空字符串。 */
+        /** 本地无 namespace/ACL 时也必须在 YAML 中显式配置为空字符串。 */
         @NotNull
         private String namespace;
-        /** 无 ACL 的本地部署允许显式配置为空字符串。 */
         @NotNull
         private String accessKey;
-        /** 无 ACL 的本地部署允许显式配置为空字符串。 */
         @NotNull
         private String secretKey;
 
-        /** RocketMQ 只有在 AK/SK 同时存在时才启用凭证，禁止只配一半后静默退化成无 ACL。 */
         @AssertTrue(message = "RocketMQ consumer.access-key 与 secret-key 必须同时为空或同时配置")
         public boolean isCredentialPairValid() {
             if (accessKey == null || secretKey == null) {
-                // 缺失值由字段上的 @NotNull 给出更直接的配置键提示。
                 return true;
             }
             return accessKey.isBlank() == secretKey.isBlank();
@@ -187,7 +248,30 @@ public class RocketMqLearningProperties {
         private long initialDelayMillis;
     }
 
-    /** Outbox 轮询、抢占和失败退避的参数，不是 RocketMQ 客户端连接参数。 */
+    /**
+     * DELAY Topic 的共享发送约束。
+     *
+     * <p>Outbox 延迟事件与事务消息超时中继都必须使用同一最小值，避免一条链路从配置读取、
+     * 另一条链路在 Java 中写死 {@code 1} 秒，最终出现两套难以解释的行为。</p>
+     */
+    @Data
+    public static class Delay {
+        @Positive
+        private long minimumBrokerDelaySeconds;
+    }
+
+    /** Cache Aside 商品库存查询的键空间和过期时间。 */
+    @Data
+    public static class ProductCache {
+        /** 例如 playground:product:，最终键为前缀加 productId。 */
+        @NotBlank
+        private String keyPrefix;
+        /** 缓存只用于查询加速，短 TTL 用于限制极端并发窗口下陈旧库存的存活时间。 */
+        @Positive
+        private long ttlSeconds;
+    }
+
+    /** Outbox 领取、租约、发布重试和退避配置。 */
     @Data
     public static class Outbox {
         @Positive
@@ -199,12 +283,9 @@ public class RocketMqLearningProperties {
         private long lockTimeoutSeconds;
         @Min(0)
         private int maxPublishRetries;
-        /** 延迟消息到期后，仍至少交给 Broker 延迟多久，避免误走普通发送 API。 */
-        @Positive
-        private long minimumBrokerDelayMillis;
         @Valid
         @NotNull
-        private Retry retry = new Retry();
+        private Retry retry;
     }
 
     @Data

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * Outbox 的写入、原子领取、状态推进和分页观察接口。
+ * Outbox 的写入、原子领取和状态推进接口。
  *
  * <p>所有更新方法都返回受影响行数；调用方必须把 0 行视为状态已被其他工作线程推进，
  * 不能把它误当成可再次覆盖的成功。</p>
@@ -36,11 +36,4 @@ public interface MqOutboxEventMapper {
                    @Param("nextRetryAt") LocalDateTime nextRetryAt,
                    @Param("maxPublishRetries") int maxPublishRetries);
 
-    MqOutboxEvent selectById(@Param("id") String id);
-
-    List<MqOutboxEvent> selectPage(@Param("status") String status,
-                                   @Param("offset") long offset,
-                                   @Param("pageSize") int pageSize);
-
-    long countPage(@Param("status") String status);
 }

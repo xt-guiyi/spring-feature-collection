@@ -1,9 +1,9 @@
 package com.xt.xiaoxingxing.playground.mongo.dto.request;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 /** value 使用 JsonNode 接收前端动态 JSON，进入 Service 后再按题型转换为明确 BSON 值。 */
 @Data
