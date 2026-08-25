@@ -7,17 +7,15 @@ import com.xt.xiaoxingxing.playground.xxljob.enums.BasicJobOutcome;
 import com.xt.xiaoxingxing.playground.xxljob.support.XxlJobHandlerSupport;
 import com.xxl.job.core.context.XxlJobHelper;
 import com.xxl.job.core.handler.annotation.XxlJob;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.TimeUnit;
 
 /** XXL-JOB 基础任务示例。 */
+@Slf4j
 @Component
 public class XxlJobDemoHandler {
-
-    private static final Logger log = LoggerFactory.getLogger(XxlJobDemoHandler.class);
 
     private final XxlJobHandlerSupport handlerSupport;
 
@@ -48,7 +46,7 @@ public class XxlJobDemoHandler {
         handlerSupport.execute(
                 XxlJobNames.LIFECYCLE,
                 context -> handlerSupport.handleSuccess(
-                        "生命周期任务执行完成，jobId=" + context.getJobId() + "，logId=" + context.getLogId()
+                        "生命周期任务执行完成，jobId=" + context.jobId() + "，logId=" + context.logId()
                 )
         );
     }
@@ -79,7 +77,7 @@ public class XxlJobDemoHandler {
                         "慢任务进度：{}/{} 秒，logId={}",
                         elapsedSeconds,
                         param.getSeconds(),
-                        context.getLogId()
+                        context.logId()
                 );
             }
             handlerSupport.handleSuccess("慢任务完成，共执行" + param.getSeconds() + "秒");

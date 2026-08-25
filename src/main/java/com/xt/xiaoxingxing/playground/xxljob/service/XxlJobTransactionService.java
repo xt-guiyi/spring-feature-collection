@@ -46,11 +46,11 @@ public class XxlJobTransactionService {
         candidate.setExecutionKey(executionKey);
         candidate.setHandlerName(handlerName);
         candidate.setLeaseToken(UUID.randomUUID().toString());
-        candidate.setJobId(context.getJobId());
-        candidate.setLogId(context.getLogId());
-        candidate.setLogDateTime(context.getLogDateTime());
-        candidate.setShardIndex(context.getShardIndex());
-        candidate.setShardTotal(context.getShardTotal());
+        candidate.setJobId(context.jobId());
+        candidate.setLogId(context.logId());
+        candidate.setLogDateTime(context.logDateTime());
+        candidate.setShardIndex(context.shardIndex());
+        candidate.setShardTotal(context.shardTotal());
         return executionMapper.claim(candidate, leaseSeconds);
     }
 
@@ -96,6 +96,7 @@ public class XxlJobTransactionService {
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningOrderSummary writeDailySummary(
             DailyOrderSummaryJobParam param, XxlLearningExecution execution) {
+        // 1. 汇总指定业务日的订单数据。
         LocalDateTime start = param.getBusinessDate().atStartOfDay();
         LocalDateTime end = param.getBusinessDate().plusDays(1).atStartOfDay();
         XxlLearningOrderSummary summary = orderSummaryMapper.aggregateOrders(start, end);
@@ -105,12 +106,14 @@ public class XxlJobTransactionService {
         summary.setSourceEndAt(end);
         summary.setExecutionId(execution.getId());
 
+        // 2. 保存日报并保留较高版本。
         int changed = orderSummaryMapper.upsertHigherVersion(summary);
         XxlLearningOrderSummary current = BusinessAssert.notNull(
                 orderSummaryMapper.selectByDate(param.getBusinessDate()), "订单日报写入后未找到数据");
         BusinessAssert.isTrue(current.getRunVersion() <= param.getRunVersion(),
                 "该业务日已存在更高版本日报，当前低版本不能覆盖");
 
+        // 3. 日报和执行成功状态在同一事务中提交。
         String result = changed == 1
                 ? "订单日报已生成，日期=" + param.getBusinessDate() + "，版本=" + param.getRunVersion()
                 : "相同版本订单日报已存在，本次幂等跳过";
@@ -124,6 +127,7 @@ public class XxlJobTransactionService {
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningBatch generateBatch(
             GenerateWorkBatchJobParam param, XxlLearningExecution execution) {
+        // 1. 创建批次主记录。
         XxlLearningBatch candidate = new XxlLearningBatch();
         candidate.setBatchKey(param.getBatchKey());
         candidate.setItemCount(param.getItemCount());
@@ -132,18 +136,21 @@ public class XxlJobTransactionService {
         candidate.setGeneratedExecutionId(execution.getId());
         batchMapper.insertIfAbsent(candidate);
 
+        // 2. 读取批次并确认生成参数一致。
         XxlLearningBatch batch = BusinessAssert.notNull(
                 batchMapper.selectByBatchKey(param.getBatchKey()), "工作批次创建失败");
-        // 同一 batchKey 不能混用不同生成参数。
         BusinessAssert.isTrue(batch.getItemCount() == param.getItemCount()
                         && batch.getFailEvery() == param.getFailEvery()
                         && batch.getFailTimes() == param.getFailTimes(),
                 "相同batchKey已经绑定不同生成参数，不能混用两次实验");
 
+        // 3. 一次生成批次下的全部工作项。
         workItemMapper.insertGeneratedItems(
                 batch.getId(), param.getItemCount(), param.getFailEvery(), param.getFailTimes());
         BusinessAssert.isTrue(workItemMapper.countByBatchId(batch.getId()) == param.getItemCount(),
                 "工作项数量不完整，整笔批次生成已回滚");
+
+        // 4. 批次数据和执行成功状态在同一事务中提交。
         String result = "工作批次准备完成，batchKey=" + param.getBatchKey()
                 + "，itemCount=" + param.getItemCount();
         BusinessAssert.isTrue(executionMapper.markSuccess(
@@ -156,17 +163,20 @@ public class XxlJobTransactionService {
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public WorkItemClaim claimWorkItems(
             ProcessWorkItemsJobParam param, XxlJobRunContext context) {
+        // 1. 将达到最大次数的过期工作项结束为 DEAD。
         Set<Long> affectedBatchIds = new HashSet<>();
         affectedBatchIds.addAll(workItemMapper.closeExpiredExhausted(
-                param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
+                param.getMaxAttempts(), context.shardIndex(), context.shardTotal(),
                 "最后一次尝试期间租约过期，周期扫描将工作项收口为DEAD"));
         affectedBatchIds.addAll(workItemMapper.closeRetryWaitExhausted(
-                param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
+                param.getMaxAttempts(), context.shardIndex(), context.shardTotal(),
                 "处理参数中的maxAttempts已不大于既有尝试次数，周期扫描将工作项收口为DEAD"));
+
+        // 2. 领取当前分片本轮可以处理的工作项。
         List<XxlLearningWorkItem> items = workItemMapper.claimShardItems(
                 param.getBatchSize(), UUID.randomUUID().toString(),
-                param.getLeaseSeconds(), context.getJobId(), context.getLogId(), param.getMaxAttempts(),
-                context.getShardIndex(), context.getShardTotal());
+                param.getLeaseSeconds(), context.jobId(), context.logId(), param.getMaxAttempts(),
+                context.shardIndex(), context.shardTotal());
         items.forEach(item -> affectedBatchIds.add(item.getBatchId()));
         return new WorkItemClaim(items, affectedBatchIds);
     }
@@ -188,6 +198,8 @@ public class XxlJobTransactionService {
     public void failWorkItem(XxlLearningWorkItem item, ProcessWorkItemsJobParam param) {
         String error = "学习案例计划失败，第" + item.getAttemptCount() + "次尝试";
         int affected;
+
+        // 达到最大次数后结束，否则等待下一轮重试。
         if (item.getAttemptCount() >= param.getMaxAttempts()) {
             affected = workItemMapper.markDead(item.getId(), item.getLeaseToken(), error);
         } else {
@@ -201,17 +213,20 @@ public class XxlJobTransactionService {
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public void succeedWorkItem(
             XxlLearningWorkItem item, XxlLearningExecution execution, XxlJobRunContext context) {
+        // 1. 保存工作项的唯一处理结果。
         XxlLearningWorkResult result = new XxlLearningWorkResult();
         result.setWorkItemId(item.getId());
         result.setBatchId(item.getBatchId());
         result.setItemNo(item.getItemNo());
         result.setExecutionId(execution.getId());
         result.setResultValue("item-" + item.getItemNo() + "-processed");
-        result.setJobId(context.getJobId());
-        result.setLogId(context.getLogId());
-        result.setShardIndex(context.getShardIndex());
-        result.setShardTotal(context.getShardTotal());
+        result.setJobId(context.jobId());
+        result.setLogId(context.logId());
+        result.setShardIndex(context.shardIndex());
+        result.setShardTotal(context.shardTotal());
         workResultMapper.insertIfAbsent(result);
+
+        // 2. 将工作项更新为成功。
         BusinessAssert.isTrue(workItemMapper.markSuccess(item.getId(), item.getLeaseToken()) == 1,
                 "工作项租约已失效，结果写入和状态更新已一起回滚");
     }
@@ -219,7 +234,7 @@ public class XxlJobTransactionService {
     /** 根据全部工作项刷新批次状态。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningBatch refreshBatch(long batchId) {
-        // 锁定批次，防止并发分片用旧快照回退状态。
+        // 锁定批次后，根据全部工作项重新计算批次状态。
         BusinessAssert.notNull(batchMapper.selectByIdForUpdate(batchId), "工作批次不存在");
         return BusinessAssert.notNull(batchMapper.refreshStatusReturning(batchId), "工作批次不存在");
     }

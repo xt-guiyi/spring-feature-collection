@@ -24,18 +24,15 @@ public class XxlJobHandlerSupport {
             XxlJobHelper.log(
                     "[{}]开始执行，jobId={}，logId={}，shard={}/{}",
                     handlerName,
-                    context.getJobId(),
-                    context.getLogId(),
-                    context.getShardIndex(),
-                    context.getShardTotal()
+                    context.jobId(),
+                    context.logId(),
+                    context.shardIndex(),
+                    context.shardTotal()
             );
             action.run(context);
-        } catch (Exception exception) {
+        } catch (Exception | Error exception) {
             XxlJobHelper.log(exception);
             throw exception;
-        } catch (Error error) {
-            XxlJobHelper.log(error);
-            throw error;
         }
     }
 

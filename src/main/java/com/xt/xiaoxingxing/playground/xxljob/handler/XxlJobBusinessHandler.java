@@ -1,6 +1,5 @@
 package com.xt.xiaoxingxing.playground.xxljob.handler;
 
-import com.xt.xiaoxingxing.playground.xxljob.config.XxlJobProperties;
 import com.xt.xiaoxingxing.playground.xxljob.config.XxlJobNames;
 import com.xt.xiaoxingxing.playground.xxljob.dto.request.DailyOrderSummaryJobParam;
 import com.xt.xiaoxingxing.playground.xxljob.dto.request.GenerateWorkBatchJobParam;
@@ -18,19 +17,18 @@ import java.time.ZoneId;
 @Component
 public class XxlJobBusinessHandler {
 
+    /** 订单业务时区。 */
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+
     private final XxlJobHandlerSupport handlerSupport;
     private final XxlJobLearningService learningService;
-    /** 业务日期时区。 */
-    private final ZoneId businessZone;
 
     public XxlJobBusinessHandler(
             XxlJobHandlerSupport handlerSupport,
-            XxlJobLearningService learningService,
-            XxlJobProperties properties
+            XxlJobLearningService learningService
     ) {
         this.handlerSupport = handlerSupport;
         this.learningService = learningService;
-        this.businessZone = properties.getLearning().getBusinessZone();
     }
 
     /** 演示失败重试与业务幂等。 */
@@ -48,10 +46,12 @@ public class XxlJobBusinessHandler {
     public void xxlDailyOrderSummaryJobHandler() throws Exception {
         handlerSupport.execute(XxlJobNames.DAILY_ORDER_SUMMARY, context -> {
             DailyOrderSummaryJobParam param = handlerSupport.parseParam(DailyOrderSummaryJobParam.class);
+
+            // 未指定日期时汇总调度日前一天的订单。
             if (param.getBusinessDate() == null) {
                 param.setBusinessDate(
-                        Instant.ofEpochMilli(context.getLogDateTime())
-                                .atZone(businessZone)
+                        Instant.ofEpochMilli(context.logDateTime())
+                                .atZone(BUSINESS_ZONE)
                                 .toLocalDate()
                                 .minusDays(1)
                 );

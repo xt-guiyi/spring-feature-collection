@@ -9,8 +9,6 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
-import java.time.ZoneId;
-
 /** XXL-JOB 配置。 */
 @Data
 @Validated
@@ -23,10 +21,6 @@ public class XxlJobProperties {
 
     @Valid
     private Executor executor = new Executor();
-
-    /** 学习任务配置。 */
-    @Valid
-    private Learning learning = new Learning();
 
     /** Admin 连接参数。 */
     @Data
@@ -78,13 +72,5 @@ public class XxlJobProperties {
         /** 扫描 {@code @XxlJob} 时需要排除的包前缀，多个值用逗号分隔。 */
         @NotNull(message = "xxl.job.executor.excluded-package 必须显式声明；不排除时请配置为空字符串")
         private String excludedPackage;
-    }
-
-    /** 业务日期时区。 */
-    @Data
-    public static class Learning {
-
-        @NotNull(message = "xxl.job.learning.business-zone 不能为空")
-        private ZoneId businessZone;
     }
 }

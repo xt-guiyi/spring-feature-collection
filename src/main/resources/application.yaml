@@ -59,5 +59,3 @@ xxl:
       ip: ""
       log-retention-days: 7
       excluded-package: org.springframework,spring
-    learning:
-      business-zone: Asia/Shanghai

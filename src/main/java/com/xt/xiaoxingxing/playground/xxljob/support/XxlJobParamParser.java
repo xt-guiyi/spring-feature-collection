@@ -25,16 +25,17 @@ public class XxlJobParamParser {
 
     /** 读取当前任务参数并转换为指定 DTO。 */
     public <T> T parse(Class<T> parameterType) {
+        // 1. 读取 Admin 配置的任务参数。
         String rawParam = XxlJobHelper.getJobParam();
         if (!StringUtils.hasText(rawParam)) {
             throw new IllegalArgumentException("XXL-JOB任务参数不能为空，期望JSON类型：" + parameterType.getSimpleName());
         }
 
+        // 2. 将 JSON 转换为任务参数对象。
         final T parameter;
         try {
             parameter = jsonMapper.readValue(rawParam, parameterType);
         } catch (JacksonException exception) {
-            // 不回显原始参数，避免敏感内容进入调度日志。
             throw new IllegalArgumentException(
                     "XXL-JOB任务参数不是合法的" + parameterType.getSimpleName()
                             + " JSON：" + exception.getOriginalMessage(),
@@ -42,7 +43,7 @@ public class XxlJobParamParser {
             );
         }
 
-        // JSON null 不能作为业务 DTO。
+        // 3. 校验转换后的任务参数。
         if (parameter == null) {
             throw new IllegalArgumentException(
                     "XXL-JOB任务参数不能是JSON null，期望JSON对象：" + parameterType.getSimpleName()
