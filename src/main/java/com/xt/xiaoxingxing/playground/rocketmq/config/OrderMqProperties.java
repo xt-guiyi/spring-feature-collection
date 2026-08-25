@@ -14,7 +14,7 @@ public class OrderMqProperties {
 
     /** 订单支付超时时间。 */
     @Positive
-    private long orderTimeoutMillis = 1_800_000L;
+    private long orderTimeoutMillis = 100_000L;
 
     /** 事务记录准备状态超时时间。 */
     @Positive

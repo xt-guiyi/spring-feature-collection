@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 
 @Configuration
-@EnableConfigurationProperties(RedisConnectionProperties.class)
+@EnableConfigurationProperties({RedisConnectionProperties.class, RedisLockProperties.class})
 public class RedissonConfig {
 
     @Bean

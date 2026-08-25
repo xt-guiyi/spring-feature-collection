@@ -490,7 +490,7 @@ public class PgMyBatisServiceImpl implements PgMyBatisService {
 
         // 第1步：查询只包含订单ID、订单号和枚举状态的专用投影。
         // XML 只查询 orders.status 原始 code。普通 MyBatis Mapper 与 Plus Mapper 共用
-        // PlaygroundMyBatisConfig 创建的 MybatisConfiguration，因此进入 Service 时，
+        // MyBatisConfig 创建的 MybatisConfiguration，因此进入 Service 时，
         // status 已经由 MyBatis-Plus 枚举类型处理器转换成 OrderStatusEnum，
         // 不需要再通过 switch 判断字符串。
         return queryMapper.selectOrderStatusWithEnumMapping().stream().map(order -> {

@@ -1,7 +1,7 @@
 package com.xt.xiaoxingxing.playground.redis.service.impl;
 
-import com.xt.xiaoxingxing.playground.redis.config.RedisLockProperties;
 import com.xt.xiaoxingxing.playground.redis.service.LockDemoService;
+import com.xt.xiaoxingxing.shared.config.RedisLockProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;

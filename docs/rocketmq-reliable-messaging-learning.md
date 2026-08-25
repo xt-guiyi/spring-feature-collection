@@ -280,14 +280,6 @@ rocketmq:
 
 `endpoints` 指向 RocketMQ Proxy 的 gRPC 端口。当前本地 Proxy 不启用 TLS，因此显式关闭 SSL。Producer 直接读取该配置；Starter 2.3.6 不能在 Listener 注解的 boolean 属性中解析 YAML 占位符，所以 `OrderMqListenerEnhancer` 只负责把同一个 `ssl-enabled` 值同步给四个 Listener。切换 TLS 环境时只需改这一处连接配置。当前案例没有半开半关的运行模式，因此不再保留只能关闭 Listener、却无法关闭发送入口的 `enabled` 假开关。
 
-同一文件还会缩短开发环境的付款超时时间：
-
-```yaml
-playground:
-  order-mq:
-    order-timeout-millis: 100000
-```
-
 Producer 不再在 YAML 重复声明请求超时，使用 RocketMQ SDK 默认的 3 秒。
 
 正式环境在 `application-prod.yaml` 中通过 `ROCKETMQ_ENDPOINTS`、`ROCKETMQ_ACCESS_KEY`、
@@ -295,11 +287,11 @@ Producer 不再在 YAML 重复声明请求超时，使用 RocketMQ SDK 默认的
 
 ### 9.2 Java 默认值
 
-`OrderMqProperties` 只保留四个确实需要按环境调整的业务默认值：
+`OrderMqProperties` 集中保存订单消息的业务默认值：
 
 | 属性 | 默认值 |
 |---|---:|
-| `orderTimeoutMillis` | `1_800_000` 毫秒 |
+| `orderTimeoutMillis` | `100_000` 毫秒 |
 | `transactionPreparedTimeoutSeconds` | `120` 秒 |
 | `transactionCleanupBatchSize` | `50` 条 |
 | `productCacheTtlSeconds` | `300` 秒 |

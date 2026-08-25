@@ -19,6 +19,19 @@ logging:
     console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(---){faint} %clr([%15.15thread]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n"
 
 application:
+  mybatis:
+    mapper-locations:
+      business: []
+      playground:
+        - "classpath*:mapper/**/*.xml"
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    pagination-db-type: POSTGRE_SQL
+  redis:
+    lock:
+      wait-time: 3s
+      lease-time: 10s
+      simulated-work-duration: 1s
   cors:
     path-pattern: "/**"
     allowed-methods:
@@ -36,19 +49,6 @@ application:
     description: 项目接口文档
     group: playground
     display-name: playground
-
-playground:
-  mybatis:
-    mapper-locations:
-      - "classpath*:mapper/**/*.xml"
-    map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
-    pagination-db-type: POSTGRE_SQL
-  redis:
-    lock:
-      wait-time: 3s
-      lease-time: 10s
-      simulated-work-duration: 1s
 
 xxl:
   job:

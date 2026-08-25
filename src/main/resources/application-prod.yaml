@@ -1,55 +1,55 @@
 server:
-  port: ${SERVER_PORT:3379}
+  port: 3379
 
 spring:
   output:
     ansi:
-      enabled: never
+      enabled: always
   mongodb:
-    uri: ${MONGODB_URI}
+    uri: mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT:6379}
-      username: ${REDIS_USERNAME:}
-      password: ${REDIS_PASSWORD:}
-      database: ${REDIS_DATABASE:0}
-      timeout: ${REDIS_TIMEOUT:3s}
-      connect-timeout: ${REDIS_CONNECT_TIMEOUT:3s}
+      host: localhost
+      port: 6379
+      username: ""
+      password: ""
+      database: 0
+      timeout: 3s
+      connect-timeout: 3s
       ssl:
-        enabled: ${REDIS_SSL_ENABLED:false}
+        enabled: false
   datasource:
     business:
-      url: ${BUSINESS_DB_URL}
-      username: ${BUSINESS_DB_USERNAME}
-      password: ${BUSINESS_DB_PASSWORD}
+      url: jdbc:postgresql://localhost:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai
+      username: root
+      password: 123456
       driver-class-name: org.postgresql.Driver
     playground:
-      url: ${PLAYGROUND_DB_URL}
-      username: ${PLAYGROUND_DB_USERNAME}
-      password: ${PLAYGROUND_DB_PASSWORD}
+      url: jdbc:postgresql://localhost:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai
+      username: root
+      password: 123456
       driver-class-name: org.postgresql.Driver
 
 application:
   cors:
-    enabled: ${CORS_ENABLED:false}
+    enabled: true
     allowed-origins:
-      - ${CORS_ALLOWED_ORIGIN}
+      - http://localhost:5173
 
 rocketmq:
   producer:
-    endpoints: ${ROCKETMQ_ENDPOINTS}
-    access-key: ${ROCKETMQ_ACCESS_KEY:}
-    secret-key: ${ROCKETMQ_SECRET_KEY:}
-    namespace: ${ROCKETMQ_NAMESPACE:}
-    ssl-enabled: ${ROCKETMQ_SSL_ENABLED:true}
+    endpoints: localhost:18081
+    access-key: ""
+    secret-key: ""
+    namespace: ""
+    ssl-enabled: false
 
 xxl:
   job:
     admin:
-      addresses: ${XXL_JOB_ADMIN_ADDRESSES}
-      access-token: ${XXL_JOB_ACCESS_TOKEN}
+      addresses: http://127.0.0.1:18083
+      access-token: xxl-job-learning-token
     executor:
-      address: ${XXL_JOB_EXECUTOR_ADDRESS}
-      port: ${XXL_JOB_EXECUTOR_PORT:19999}
-      log-path: ${XXL_JOB_LOG_PATH:/tmp/xxl-job/jobhandler}
+      address: http://host.docker.internal:19999
+      port: 19999
+      log-path: /tmp/xxl-job/jobhandler
