@@ -5,7 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 工作项成功副作用的审计响应；一项工作最多只能生成一条结果。 */
+/** 工作结果响应。 */
 @Data
 public class XxlLearningWorkResultVO {
 
@@ -22,9 +22,6 @@ public class XxlLearningWorkResultVO {
     private LocalDateTime createdAt;
 
     public static XxlLearningWorkResultVO from(XxlLearningWorkResult source) {
-        if (source == null) {
-            return null;
-        }
         XxlLearningWorkResultVO target = new XxlLearningWorkResultVO();
         target.setId(source.getId());
         target.setWorkItemId(source.getWorkItemId());

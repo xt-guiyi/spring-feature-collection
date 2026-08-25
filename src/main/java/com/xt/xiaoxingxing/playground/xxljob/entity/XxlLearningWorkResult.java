@@ -4,7 +4,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 工作项唯一成功副作用的审计结果。 */
+/** 工作项处理结果。 */
 @Data
 public class XxlLearningWorkResult {
     private Long id;

@@ -2,20 +2,12 @@ server:
   port: 4379
 
 spring:
-  application:
-    name: xiaoxingxing
-
   output:
     ansi:
       enabled: always
-
   mongodb:
     uri: mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin
   data:
-    mongodb:
-      auto-index-creation: true
-      representation:
-        big-decimal: decimal128
     redis:
       host: localhost
       port: 6379
@@ -26,7 +18,6 @@ spring:
       connect-timeout: 3s
       ssl:
         enabled: false
-
   datasource:
     business:
       url: jdbc:postgresql://localhost:5432/postgres
@@ -39,142 +30,30 @@ spring:
       password: 123456
       driver-class-name: org.postgresql.Driver
 
-  jackson:
-    datatype:
-      datetime:
-        write-dates-as-timestamps: false
-
-  task:
-    scheduling:
-      pool:
-        size: 2
-      thread-name-prefix: playground-scheduling-
-
-logging:
-  level:
-    root: INFO
-    web: INFO
-  pattern:
-    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(---){faint} %clr([%15.15thread]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n"
-
 application:
   cors:
-    # 开发环境固定允许本地前端跨域；需要关闭时直接把 enabled 改为 false。
     enabled: true
-    path-pattern: "/**"
     allowed-origins:
       - http://localhost:5173
-    allowed-methods:
-      - GET
-      - POST
-      - PUT
-      - DELETE
-      - OPTIONS
-    allowed-headers:
-      - "*"
-    allow-credentials: true
-  open-api:
-    title: API 文档
-    version: 1.0.0
-    description: 项目接口文档
-    group: playground
-    display-name: playground
 
 rocketmq:
   producer:
     endpoints: localhost:18081
-    topic: "pg_order_events,pg_order_timeouts,pg_order_transactions"
-    request-timeout: 5
-    max-attempts: 3
-    ssl-enabled: false
-    namespace: ""
     access-key: ""
     secret-key: ""
+    namespace: ""
+    ssl-enabled: false
 
 playground:
-  mybatis:
-    mapper-locations:
-      - "classpath*:mapper/**/*.xml"
-    map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
-    pagination-db-type: POSTGRE_SQL
-
-  redis:
-    lock:
-      wait-time: 3s
-      lease-time: 10s
-      simulated-work-duration: 1s
-
-  rocketmq:
-    enabled: true
-    endpoints: localhost:18081
-    topics:
-      normal: pg_order_events
-      delay: pg_order_timeouts
-      transaction: pg_order_transactions
-    tags:
-      order-created: ORDER_CREATED
-      order-paid: ORDER_PAID
-      order-cancelled: ORDER_CANCELLED
-      outbox-timeout: OUTBOX_PAYMENT_TIMEOUT_CHECK
-      transaction-timeout: TRANSACTION_PAYMENT_TIMEOUT_CHECK
-    consumer-groups:
-      outbox-order-cache: pg_outbox_order_cache_group_v1
-      outbox-order-statistics: pg_outbox_order_statistics_group_v1
-      outbox-order-timeout: pg_outbox_order_timeout_group_v1
-      transaction-order-cache: pg_transaction_order_cache_group_v1
-      transaction-order-statistics: pg_transaction_order_statistics_group_v1
-      transaction-timeout-scheduler: pg_transaction_timeout_scheduler_group_v1
-      transaction-order-timeout: pg_transaction_order_timeout_group_v1
-    subscriptions:
-      cache-events: ORDER_CREATED || ORDER_CANCELLED
-      statistics-events: ORDER_CREATED || ORDER_PAID || ORDER_CANCELLED
-    consumer:
-      ssl-enabled: false
-      request-timeout: 3
-      max-cached-message-count: 1024
-      max-cache-message-size-in-bytes: 67108864
-      consumption-thread-count: 20
-      filter-expression-type: tag
-      namespace: ""
-      access-key: ""
-      secret-key: ""
-    order-timeout-millis: 10000
-#    order-timeout-millis: 1800000
-    delay:
-      minimum-broker-delay-seconds: 1
-    product-cache:
-      key-prefix: "playground:product:"
-      ttl-seconds: 300
-    transaction-prepared-timeout-seconds: 120
-    transaction-cleanup-batch-size: 50
-    transaction-cleanup:
-      fixed-delay-millis: 30000
-      initial-delay-millis: 30000
-    outbox:
-      batch-size: 20
-      fixed-delay-millis: 3000
-      lock-timeout-seconds: 60
-      max-publish-retries: 10
-      retry:
-        initial-delay-seconds: 5
-        max-delay-seconds: 300
-        max-exponent: 6
+  order-mq:
+    order-timeout-millis: 100000
 
 xxl:
   job:
     admin:
       addresses: http://127.0.0.1:18083
       access-token: xxl-job-learning-token
-      timeout: 3
     executor:
-      enabled: false
-      appname: spring-feature-collection-executor
       address: http://host.docker.internal:19999
-      ip: ""
       port: 19999
       log-path: /tmp/xxl-job/jobhandler
-      log-retention-days: 7
-      excluded-package: org.springframework,spring
-    learning:
-      business-zone: Asia/Shanghai

@@ -10,7 +10,7 @@ import lombok.Data;
 @Data
 public class GenerateWorkBatchJobParam {
 
-    /** 批次业务键；同一个键重复触发应由数据库唯一约束收敛为同一批工作项。 */
+    /** 批次业务键。 */
     @NotBlank(message = "batchKey不能为空")
     @Size(max = 200, message = "batchKey长度不能超过200")
     private String batchKey;
@@ -19,7 +19,7 @@ public class GenerateWorkBatchJobParam {
     @Max(value = 10000, message = "itemCount不能大于10000")
     private int itemCount;
 
-    /** 大于 0 时，每逢该序号倍数的工作项演示失败；0 表示不注入失败。 */
+    /** 计划失败间隔，0 表示禁用。 */
     @Min(value = 0, message = "failEvery不能小于0")
     private int failEvery;
 

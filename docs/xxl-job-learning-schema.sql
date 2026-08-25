@@ -27,7 +27,6 @@ CREATE TABLE xxl_learning_execution (
     job_id BIGINT NOT NULL,
     log_id BIGINT NOT NULL,
     log_date_time BIGINT NOT NULL,
-    log_file_name VARCHAR(500),
     shard_index INT NOT NULL,
     shard_total INT NOT NULL,
     result_message VARCHAR(1000),
@@ -184,7 +183,7 @@ COMMENT ON COLUMN xxl_learning_execution.execution_key IS
 COMMENT ON COLUMN xxl_learning_execution.handler_name IS
     'XXL-JOB 执行器方法名，与 @XxlJob 注解中的 handler 名称对应。';
 COMMENT ON COLUMN xxl_learning_execution.status IS
-    '执行状态：RUNNING 表示正在执行，SUCCESS 表示成功，FAILED 表示最终失败。';
+    '执行状态：RUNNING 表示正在执行，SUCCESS 表示业务已成功，FAILED 表示最近一次尝试失败且允许再次触发领取。';
 COMMENT ON COLUMN xxl_learning_execution.attempt_count IS
     '当前业务执行已尝试的次数，首次执行从 1 开始，重试时递增。';
 COMMENT ON COLUMN xxl_learning_execution.lease_token IS
@@ -197,8 +196,6 @@ COMMENT ON COLUMN xxl_learning_execution.log_id IS
     'XXL-JOB Admin 生成的调度日志 ID，一次调度尝试对应一个 log_id，不适合单独作为业务幂等键。';
 COMMENT ON COLUMN xxl_learning_execution.log_date_time IS
     'XXL-JOB 传入的调度日志时间，以 Unix 毫秒时间戳保存。';
-COMMENT ON COLUMN xxl_learning_execution.log_file_name IS
-    'XXL-JOB 执行日志文件名，用于运维排查时定位该次执行的日志。';
 COMMENT ON COLUMN xxl_learning_execution.shard_index IS
     '当前分片序号，从 0 开始，必须小于 shard_total。';
 COMMENT ON COLUMN xxl_learning_execution.shard_total IS
@@ -210,7 +207,7 @@ COMMENT ON COLUMN xxl_learning_execution.last_error IS
 COMMENT ON COLUMN xxl_learning_execution.started_at IS
     '该业务执行首次开始的时间。';
 COMMENT ON COLUMN xxl_learning_execution.completed_at IS
-    '该业务执行进入 SUCCESS 或 FAILED 终态的完成时间；RUNNING 状态必须为空。';
+    '最近一次尝试进入 SUCCESS 或 FAILED 时的完成时间；FAILED 再次领取后会重新清空。';
 COMMENT ON COLUMN xxl_learning_execution.created_at IS
     '执行记录在数据库中的创建时间。';
 COMMENT ON COLUMN xxl_learning_execution.updated_at IS

@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-/** 固定逻辑桶工作项的批量生成、分片领取与租约条件推进。 */
+/** 工作项数据访问。 */
 @Mapper
 public interface XxlLearningWorkItemMapper {
     int insertGeneratedItems(@Param("batchId") long batchId, @Param("itemCount") int itemCount,
@@ -14,8 +14,7 @@ public interface XxlLearningWorkItemMapper {
 
     long countByBatchId(@Param("batchId") long batchId);
 
-    List<XxlLearningWorkItem> claimShardItems(@Param("batchKey") String batchKey,
-                                              @Param("batchSize") int batchSize,
+    List<XxlLearningWorkItem> claimShardItems(@Param("batchSize") int batchSize,
                                               @Param("leaseTokenPrefix") String leaseTokenPrefix,
                                               @Param("leaseSeconds") int leaseSeconds,
                                               @Param("jobId") long jobId,
@@ -24,18 +23,19 @@ public interface XxlLearningWorkItemMapper {
                                               @Param("shardIndex") int shardIndex,
                                               @Param("shardTotal") int shardTotal);
 
-    int closeExpiredExhausted(@Param("batchKey") String batchKey,
-                              @Param("maxAttempts") int maxAttempts,
-                              @Param("shardIndex") int shardIndex,
-                              @Param("shardTotal") int shardTotal,
-                              @Param("lastError") String lastError);
+    List<Long> closeExpiredExhausted(@Param("maxAttempts") int maxAttempts,
+                                    @Param("shardIndex") int shardIndex,
+                                    @Param("shardTotal") int shardTotal,
+                                    @Param("lastError") String lastError);
 
-    /** 防止处理策略被调小后，已耗尽次数的 RETRY_WAIT 永久失去领取资格。 */
-    int closeRetryWaitExhausted(@Param("batchKey") String batchKey,
-                                @Param("maxAttempts") int maxAttempts,
-                                @Param("shardIndex") int shardIndex,
-                                @Param("shardTotal") int shardTotal,
-                                @Param("lastError") String lastError);
+    /** 关闭已耗尽重试次数的等待项。 */
+    List<Long> closeRetryWaitExhausted(@Param("maxAttempts") int maxAttempts,
+                                      @Param("shardIndex") int shardIndex,
+                                      @Param("shardTotal") int shardTotal,
+                                      @Param("lastError") String lastError);
+
+    int renewLease(@Param("id") long id, @Param("leaseToken") String leaseToken,
+                   @Param("leaseSeconds") int leaseSeconds);
 
     int markRetryWait(@Param("id") long id, @Param("leaseToken") String leaseToken,
                       @Param("retryDelaySeconds") int retryDelaySeconds,

@@ -24,12 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 
-/**
- * XXL-JOB 业务结果的只读观察入口。
- *
- * <p>任务的创建、修改、启停和手工触发继续在 XXL-JOB Admin 完成；这里不重复实现管理后台，
- * 只展示 PostgreSQL 中已经提交的执行台账、日报、批次和幂等结果。</p>
- */
+/** 查询 XXL-JOB 学习任务的业务结果。 */
 @Validated
 @RestController
 @RequiredArgsConstructor
@@ -38,7 +33,7 @@ public class XxlJobOperationsController {
 
     private final XxlJobOperationsService operationsService;
 
-    /** 对照 Admin 调度日志与业务 executionKey，观察失败重试是否复用了同一条业务执行链。 */
+    /** 分页查询执行台账。 */
     @GetMapping("/executions")
     public Result<PageResult<XxlLearningExecutionVO>> executions(
             @RequestParam(required = false) @Size(max = 100) String handlerName,
@@ -48,13 +43,13 @@ public class XxlJobOperationsController {
         return Result.ok(operationsService.pageExecutions(handlerName, status, pageNum, pageSize));
     }
 
-    /** 详情会包含租约、分片、最后错误和调度日志标识，适合排查一次具体执行。 */
+    /** 查询执行台账详情。 */
     @GetMapping("/executions/{id}")
     public Result<XxlLearningExecutionVO> execution(@PathVariable @Positive long id) {
         return Result.ok(operationsService.getExecution(id));
     }
 
-    /** 日期格式固定为 ISO-8601，例如 2026-08-13；开始和结束日期都包含在筛选范围内。 */
+    /** 分页查询订单日报。 */
     @GetMapping("/order-summaries")
     public Result<PageResult<XxlLearningOrderSummaryVO>> orderSummaries(
             @RequestParam(required = false)
@@ -66,7 +61,7 @@ public class XxlJobOperationsController {
         return Result.ok(operationsService.pageOrderSummaries(dateFrom, dateTo, pageNum, pageSize));
     }
 
-    /** 查看批次总体状态；状态过滤不传时返回全部批次。 */
+    /** 分页查询工作批次。 */
     @GetMapping("/batches")
     public Result<PageResult<XxlLearningBatchVO>> batches(
             @RequestParam(required = false) @Size(max = 30) String status,
@@ -75,7 +70,7 @@ public class XxlJobOperationsController {
         return Result.ok(operationsService.pageBatches(status, pageNum, pageSize));
     }
 
-    /** 查看一个批次内部每个工作项的逻辑桶、尝试次数、租约和最终状态。 */
+    /** 分页查询批次工作项。 */
     @GetMapping("/batches/{batchKey}/items")
     public Result<PageResult<XxlLearningWorkItemVO>> workItems(
             @PathVariable @NotBlank @Size(max = 200) String batchKey,
@@ -85,7 +80,7 @@ public class XxlJobOperationsController {
         return Result.ok(operationsService.pageWorkItems(batchKey, status, pageNum, pageSize));
     }
 
-    /** 成功结果按批次查询；结果表唯一约束可以直观看出重试没有重复制造业务副作用。 */
+    /** 分页查询批次处理结果。 */
     @GetMapping("/results")
     public Result<PageResult<XxlLearningWorkResultVO>> workResults(
             @RequestParam @NotBlank @Size(max = 200) String batchKey,

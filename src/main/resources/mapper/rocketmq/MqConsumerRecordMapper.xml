@@ -2,64 +2,14 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.xt.xiaoxingxing.playground.rocketmq.mapper.MqConsumerRecordMapper">
 
-    <!--
-        超时调度发送前只做短只读检查，不能先插入“已完成”再跨数据库事务调用 RocketMQ：
-        如果完成记录已经提交而 Broker 发送失败，后续重试会错误跳过并永久漏掉超时检查。
-    -->
-    <select id="existsConsumed" resultType="boolean">
-        SELECT EXISTS (
-            SELECT 1
-            FROM mq_consumed_message
-            WHERE consumer_name = #{consumerName}
-              AND message_id = #{messageId}
-        )
-    </select>
-
-    <!--
-        RocketMQ 至少一次投递下，同一消息可能并发重试，唯一约束负责最终防重，但调用顺序取决于副作用：
-        1. 订单统计在同一个 PostgreSQL 事务中先执行本 INSERT；返回 1 才继续 UPSERT，返回 0 直接结束，避免重复累计；
-        2. 缓存删除无法与 PostgreSQL 同事务，调用方先检查幂等记录、事务外删除 Redis，再执行本 INSERT 登记完成。
-           并发路径都删除相同 Key 是安全的；本 INSERT 返回 0 只表示另一条路径已经先登记完成。
-    -->
     <insert id="insertConsumedIfAbsent"
             parameterType="com.xt.xiaoxingxing.playground.rocketmq.entity.MqConsumedMessage">
         INSERT INTO mq_consumed_message (
-            consumer_name, message_id, event_type, aggregate_id, consumed_at
+            consumer_group, consume_id, consumed_at
         ) VALUES (
-            #{consumerName}, #{messageId}, #{eventType}, #{aggregateId},
-            COALESCE(#{consumedAt}, CURRENT_TIMESTAMP)
+            #{consumerGroup}, #{consumeId}, COALESCE(#{consumedAt}, CURRENT_TIMESTAMP)
         )
-        ON CONFLICT (consumer_name, message_id) DO NOTHING
-    </insert>
-
-    <!--
-        固定主键 1 的 UPSERT 将本次事件增量与已有统计在一条 SQL 中原子合并。
-        它不替代幂等记录：只有 insertConsumedIfAbsent 返回 1 后才可执行本 SQL，
-        否则重复消息仍会使计数增加。
-    -->
-    <insert id="upsertStatistics">
-        INSERT INTO order_statistics (
-            id, created_count, paid_count, cancelled_count,
-            created_amount, last_event_at, updated_at
-        ) VALUES (
-            1,
-            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN 1 ELSE 0 END,
-            CASE WHEN #{eventType} = 'ORDER_PAID' THEN 1 ELSE 0 END,
-            CASE WHEN #{eventType} = 'ORDER_CANCELLED' THEN 1 ELSE 0 END,
-            CASE WHEN #{eventType} = 'ORDER_CREATED' THEN COALESCE(#{totalAmount}, 0) ELSE 0 END,
-            #{occurredAt},
-            CURRENT_TIMESTAMP
-        )
-        ON CONFLICT (id) DO UPDATE SET
-            created_count = order_statistics.created_count + EXCLUDED.created_count,
-            paid_count = order_statistics.paid_count + EXCLUDED.paid_count,
-            cancelled_count = order_statistics.cancelled_count + EXCLUDED.cancelled_count,
-            created_amount = order_statistics.created_amount + EXCLUDED.created_amount,
-            last_event_at = CASE
-                WHEN order_statistics.last_event_at IS NULL THEN EXCLUDED.last_event_at
-                ELSE GREATEST(order_statistics.last_event_at, EXCLUDED.last_event_at)
-            END,
-            updated_at = CURRENT_TIMESTAMP
+        ON CONFLICT (consumer_group, consume_id) DO NOTHING
     </insert>
 
 </mapper>

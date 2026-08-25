@@ -1,17 +1,18 @@
 package com.xt.xiaoxingxing.playground.xxljob.dto.request;
 
+import com.xt.xiaoxingxing.playground.xxljob.enums.BasicJobOutcome;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
-/** 基础任务参数，用一套 Handler 对比成功、显式失败和异常失败。 */
+/** 基础任务参数。 */
 @Data
 public class BasicJobParam {
 
     @NotBlank(message = "message不能为空")
     private String message;
 
-    /** 未传时默认成功，便于先完成最小 Hello World，再逐步观察失败路径。 */
+    /** 任务结果，默认成功。 */
     @NotNull(message = "outcome不能为空")
     private BasicJobOutcome outcome = BasicJobOutcome.SUCCESS;
 }

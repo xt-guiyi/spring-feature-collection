@@ -37,7 +37,7 @@ src/main/java/com/xt/xiaoxingxing/
 
 ```text
 src/main/resources/
-├── application.yaml         # 默认配置
+├── application.yaml         # 公共配置
 ├── application-dev.yaml     # 开发环境配置
 ├── application-prod.yaml    # 生产环境配置
 └── logback-spring.xml       # 日志配置

@@ -5,7 +5,7 @@
     <sql id="executionColumns">
         id, execution_key AS executionKey, handler_name AS handlerName, status,
         attempt_count AS attemptCount, lease_token AS leaseToken, lease_expires_at AS leaseExpiresAt,
-        job_id AS jobId, log_id AS logId, log_date_time AS logDateTime, log_file_name AS logFileName,
+        job_id AS jobId, log_id AS logId, log_date_time AS logDateTime,
         shard_index AS shardIndex, shard_total AS shardTotal, result_message AS resultMessage,
         last_error AS lastError, started_at AS startedAt, completed_at AS completedAt,
         created_at AS createdAt, updated_at AS updatedAt
@@ -22,12 +22,12 @@
             affectData="true" flushCache="true">
         INSERT INTO xxl_learning_execution AS target (
             execution_key, handler_name, status, attempt_count, lease_token, lease_expires_at,
-            job_id, log_id, log_date_time, log_file_name, shard_index, shard_total,
+            job_id, log_id, log_date_time, shard_index, shard_total,
             started_at, created_at, updated_at
         ) VALUES (
             #{execution.executionKey}, #{execution.handlerName}, 'RUNNING', 1, #{execution.leaseToken},
             CURRENT_TIMESTAMP + (#{leaseSeconds} * INTERVAL '1 second'),
-            #{execution.jobId}, #{execution.logId}, #{execution.logDateTime}, #{execution.logFileName},
+            #{execution.jobId}, #{execution.logId}, #{execution.logDateTime},
             #{execution.shardIndex}, #{execution.shardTotal},
             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
@@ -40,7 +40,6 @@
             job_id = EXCLUDED.job_id,
             log_id = EXCLUDED.log_id,
             log_date_time = EXCLUDED.log_date_time,
-            log_file_name = EXCLUDED.log_file_name,
             shard_index = EXCLUDED.shard_index,
             shard_total = EXCLUDED.shard_total,
             result_message = NULL,
@@ -67,6 +66,16 @@
             lease_token = NULL, lease_expires_at = NULL,
             completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id} AND status = 'RUNNING' AND lease_token = #{leaseToken}
+    </update>
+
+    <update id="renewLease">
+        UPDATE xxl_learning_execution
+        SET lease_expires_at = CURRENT_TIMESTAMP + (#{leaseSeconds} * INTERVAL '1 second'),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+          AND lease_token = #{leaseToken}
+          AND lease_expires_at &gt; CURRENT_TIMESTAMP
     </update>
 
     <update id="closeExpiredRunning">

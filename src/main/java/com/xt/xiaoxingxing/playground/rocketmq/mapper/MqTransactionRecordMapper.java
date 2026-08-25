@@ -7,37 +7,26 @@ import org.apache.ibatis.annotations.Param;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * RocketMQ 事务消息状态的持久化接口。
- *
- * <p>事务检查器只依赖本表的持久事实而不读取 JVM 内存；过期 PREPARED 需要通过条件更新抢占回滚终态。
- * 所有更新方法都用状态条件保护，0 行意味着事务状态已由其他路径终结，调用方必须重新读取而不能覆盖。</p>
- */
+/** 事务消息记录数据访问接口。 */
 @Mapper
 public interface MqTransactionRecordMapper {
 
-    /**
-     * 插入 PREPARED 记录。
-     *
-     * <p>活跃记录由 {@code business_type + business_key + operation_type} 部分唯一索引防重。
-     * Mapper 不做“先查再插”，因为该写法存在并发窗口。</p>
-     */
+    /** 新增待处理事务记录。 */
     int insertPrepared(MqTransactionRecord record);
 
+    /** 将事务记录标记为已提交。 */
     int markCommitted(@Param("transactionId") String transactionId);
 
-    int markRolledBack(@Param("transactionId") String transactionId, @Param("lastError") String lastError);
+    /** 将事务记录标记为已回滚。 */
+    int markRolledBack(@Param("transactionId") String transactionId,
+                       @Param("lastError") String lastError);
 
-    /** 按通用业务三元组统计已提交记录；活跃部分唯一索引保证正常结果最多为 1。 */
-    int countCommitted(@Param("businessType") String businessType,
-                       @Param("businessKey") String businessKey,
-                       @Param("operationType") String operationType);
-
+    /** 查询过期的待处理事务记录。 */
     List<MqTransactionRecord> selectExpiredPreparedCandidates(
             @Param("expiredBefore") LocalDateTime expiredBefore,
             @Param("batchSize") int batchSize);
 
-    /** transactionId 同时也是事务消息信封的 messageId，Broker 回查直接按本表主键读取。 */
+    /** 根据事务 ID 查询事务记录。 */
     MqTransactionRecord selectById(@Param("transactionId") String transactionId);
 
 }

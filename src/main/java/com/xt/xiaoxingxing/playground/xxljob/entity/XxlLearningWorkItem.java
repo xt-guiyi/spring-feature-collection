@@ -5,7 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 可独立领取、失败、重试并最终落结果的一项工作。 */
+/** 分片工作项。 */
 @Data
 public class XxlLearningWorkItem {
     private Long id;

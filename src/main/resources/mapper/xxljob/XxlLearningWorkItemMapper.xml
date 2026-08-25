@@ -42,7 +42,7 @@
             SELECT item.id
             FROM xxl_learning_work_item item
             JOIN xxl_learning_batch batch ON batch.id = item.batch_id
-            WHERE batch.batch_key = #{batchKey}
+            WHERE batch.status IN ('READY', 'PROCESSING', 'RETRY_WAIT')
               AND (
                     (item.status IN ('PENDING', 'RETRY_WAIT') AND item.available_at &lt;= CURRENT_TIMESTAMP)
                     OR (item.status = 'RUNNING' AND item.lease_expires_at &lt;= CURRENT_TIMESTAMP)
@@ -50,7 +50,7 @@
               AND (item.last_log_id IS NULL OR item.last_log_id &lt;&gt; #{logId})
               AND item.attempt_count &lt; #{maxAttempts}
               AND MOD(item.bucket_no, #{shardTotal}) = #{shardIndex}
-            ORDER BY item.item_no ASC
+            ORDER BY batch.id ASC, item.item_no ASC
             LIMIT #{batchSize}
             FOR UPDATE OF item SKIP LOCKED
         )
@@ -70,30 +70,48 @@
     </select>
 
     <!-- worker 在最后一次领取后崩溃时没有机会写 DEAD；租约到期后由下一周期确定性收口。 -->
-    <update id="closeExpiredExhausted">
-        UPDATE xxl_learning_work_item item
-        SET status = 'DEAD', last_error = #{lastError}, lease_token = NULL, lease_expires_at = NULL,
-            completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        FROM xxl_learning_batch batch
-        WHERE batch.id = item.batch_id
-          AND batch.batch_key = #{batchKey}
-          AND item.status = 'RUNNING'
-          AND item.lease_expires_at &lt;= CURRENT_TIMESTAMP
-          AND item.attempt_count &gt;= #{maxAttempts}
-          AND MOD(item.bucket_no, #{shardTotal}) = #{shardIndex}
-    </update>
+    <select id="closeExpiredExhausted" resultType="long" affectData="true" flushCache="true">
+        WITH closed AS (
+            UPDATE xxl_learning_work_item item
+            SET status = 'DEAD', last_error = #{lastError}, lease_token = NULL, lease_expires_at = NULL,
+                completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            FROM xxl_learning_batch batch
+            WHERE batch.id = item.batch_id
+              AND batch.status IN ('READY', 'PROCESSING', 'RETRY_WAIT')
+              AND item.status = 'RUNNING'
+              AND item.lease_expires_at &lt;= CURRENT_TIMESTAMP
+              AND item.attempt_count &gt;= #{maxAttempts}
+              AND MOD(item.bucket_no, #{shardTotal}) = #{shardIndex}
+            RETURNING item.batch_id
+        )
+        SELECT DISTINCT batch_id FROM closed
+    </select>
 
     <!-- 正常学习流程要求参数固定；这条防御更新避免误把 maxAttempts 调小后 RETRY_WAIT 永久悬挂。 -->
-    <update id="closeRetryWaitExhausted">
-        UPDATE xxl_learning_work_item item
-        SET status = 'DEAD', last_error = #{lastError}, lease_token = NULL, lease_expires_at = NULL,
-            completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        FROM xxl_learning_batch batch
-        WHERE batch.id = item.batch_id
-          AND batch.batch_key = #{batchKey}
-          AND item.status = 'RETRY_WAIT'
-          AND item.attempt_count &gt;= #{maxAttempts}
-          AND MOD(item.bucket_no, #{shardTotal}) = #{shardIndex}
+    <select id="closeRetryWaitExhausted" resultType="long" affectData="true" flushCache="true">
+        WITH closed AS (
+            UPDATE xxl_learning_work_item item
+            SET status = 'DEAD', last_error = #{lastError}, lease_token = NULL, lease_expires_at = NULL,
+                completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            FROM xxl_learning_batch batch
+            WHERE batch.id = item.batch_id
+              AND batch.status IN ('READY', 'PROCESSING', 'RETRY_WAIT')
+              AND item.status = 'RETRY_WAIT'
+              AND item.attempt_count &gt;= #{maxAttempts}
+              AND MOD(item.bucket_no, #{shardTotal}) = #{shardIndex}
+            RETURNING item.batch_id
+        )
+        SELECT DISTINCT batch_id FROM closed
+    </select>
+
+    <update id="renewLease">
+        UPDATE xxl_learning_work_item
+        SET lease_expires_at = CURRENT_TIMESTAMP + (#{leaseSeconds} * INTERVAL '1 second'),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+          AND lease_token = #{leaseToken}
+          AND lease_expires_at &gt; CURRENT_TIMESTAMP
     </update>
 
     <update id="markRetryWait">

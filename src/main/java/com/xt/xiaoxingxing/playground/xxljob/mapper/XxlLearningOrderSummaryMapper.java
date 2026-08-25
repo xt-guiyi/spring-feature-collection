@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** 从订单事实聚合并以版本条件保存日报。 */
+/** 订单日报数据访问。 */
 @Mapper
 public interface XxlLearningOrderSummaryMapper {
     XxlLearningOrderSummary aggregateOrders(@Param("sourceStartAt") LocalDateTime sourceStartAt,

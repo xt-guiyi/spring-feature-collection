@@ -28,7 +28,7 @@
 - Modify: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/mapper/MqTransactionRecordMapper.java`
 - Modify: `src/main/resources/mapper/rocketmq/MqTransactionRecordMapper.xml`
 - Modify: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/config/RocketMqNames.java`
-- Modify: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/support/RocketMessagePublisher.java`
+- Modify: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/util/RocketMqUtil.java`
 - Delete later after caller migration: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/message/TransactionOrderCommandPayload.java`
 - Delete later after caller migration: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/message/TransactionOrderItemPayload.java`
 - Delete later after caller migration: `src/main/java/com/xt/xiaoxingxing/playground/rocketmq/vo/OutboxOrderCreateVO.java`
@@ -40,7 +40,7 @@
 - [x] 将 `MqTransactionRecord` 精简为 `transactionId/businessType/businessKey/operationType/status/lastError/createdAt/updatedAt`；事务基础设施不保存 `orderNo/orderId` 等订单领域专用字段。
 - [x] 重写事务记录 Mapper/XML：按 `transaction_id` 查询和更新；活跃记录按 `(business_type, business_key, operation_type)` 防重；保留 PREPARED 条件终态竞争、过期候选查询和通用已提交操作判断。
 - [x] 删除 `RocketMqNames.HEADER_TRANSACTION_ID`；事务记录主键 `transactionId` 同时就是信封 `messageId`，订单事务消息的 `aggregateId/businessKey` 统一使用稳定订单号。
-- [x] 将 `RocketMessagePublisher.beginTransaction` 改为只接收 `topic/tag/key/envelope`；不再复制 transactionId 到自定义 Header。返回句柄仍只负责 Broker 物理消息 ID、commit 和 rollback。
+- [x] `RocketMqUtil.sendTransaction` 只接收 `topic/tag/key/payload`，不再复制 transactionId 到自定义 Header。
 - [x] 静态核对：Mapper Java 方法与 XML statement 一一对应，旧 `message_id/order_no/order_id/HEADER_TRANSACTION_ID/TransactionOrderCommandPayload` 不再出现在事务记录运行链路。
 
 ## Task 2: 建立事务记录基础设施、Broker 回查与 PREPARED 清理

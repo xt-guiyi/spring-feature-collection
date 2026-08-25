@@ -6,7 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 
-/** 工作项唯一成功结果的插入与只读查询。 */
+/** 工作结果数据访问。 */
 @Mapper
 public interface XxlLearningWorkResultMapper {
     int insertIfAbsent(XxlLearningWorkResult result);

@@ -5,7 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 稳定 executionKey 对应的一条可重试执行链。 */
+/** 可重试执行台账。 */
 @Data
 public class XxlLearningExecution {
     private Long id;
@@ -18,7 +18,6 @@ public class XxlLearningExecution {
     private Long jobId;
     private Long logId;
     private Long logDateTime;
-    private String logFileName;
     private Integer shardIndex;
     private Integer shardTotal;
     private String resultMessage;

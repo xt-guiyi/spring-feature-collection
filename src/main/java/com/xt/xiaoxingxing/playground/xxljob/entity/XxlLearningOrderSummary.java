@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
-/** 上海业务日内订单事实的版本化汇总。 */
+/** 订单日报。 */
 @Data
 public class XxlLearningOrderSummary {
     private LocalDate summaryDate;

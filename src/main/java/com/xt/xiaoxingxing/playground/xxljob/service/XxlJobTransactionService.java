@@ -1,5 +1,6 @@
 package com.xt.xiaoxingxing.playground.xxljob.service;
 
+import com.xt.xiaoxingxing.playground.xxljob.config.XxlJobNames;
 import com.xt.xiaoxingxing.playground.xxljob.dto.request.DailyOrderSummaryJobParam;
 import com.xt.xiaoxingxing.playground.xxljob.dto.request.GenerateWorkBatchJobParam;
 import com.xt.xiaoxingxing.playground.xxljob.dto.request.ProcessWorkItemsJobParam;
@@ -21,17 +22,12 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
-/**
- * XXL-JOB 业务的短事务边界。
- *
- * <p>这个类与编排用的 {@link XxlJobLearningService} 分成两个 Spring Bean，是有意为之：
- * Spring 事务通过代理生效，同一个类里直接调用自己的 {@code REQUIRES_NEW} 方法不会经过代理。
- * 调度重试案例如果把“领取、业务、失败标记”包进一个最终会抛异常的大事务，失败标记也会一起回滚，
- * 下一次重试将永远以为自己还是第一次执行。</p>
- */
+/** XXL-JOB 业务的独立短事务服务。 */
 @Service
 @RequiredArgsConstructor
 public class XxlJobTransactionService {
@@ -42,23 +38,10 @@ public class XxlJobTransactionService {
     private final XxlLearningWorkItemMapper workItemMapper;
     private final XxlLearningWorkResultMapper workResultMapper;
 
-    /**
-     * 原子取得一条稳定业务执行链的执行权。
-     *
-     * <p>首次插入、FAILED 重试和过期 RUNNING 接管都由一条 PostgreSQL
-     * {@code INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING} 完成。返回 null 表示本次没有取得执行权，
-     * 调用方必须重读状态，区分已经成功和仍被其他 Worker 持有。</p>
-     */
+    /** 原子领取执行租约；未取得时返回 null。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningExecution claimExecution(
             String executionKey, String handlerName, int leaseSeconds, XxlJobRunContext context) {
-        BusinessAssert.hasText(executionKey, "executionKey不能为空");
-        BusinessAssert.isTrue(executionKey.length() <= 300, "executionKey长度不能超过300");
-        BusinessAssert.hasText(handlerName, "handlerName不能为空");
-        BusinessAssert.isTrue(handlerName.length() <= 100, "handlerName长度不能超过100");
-        BusinessAssert.isTrue(leaseSeconds >= 5 && leaseSeconds <= 3600,
-                "leaseSeconds必须在5到3600之间");
-        validateShard(context);
         XxlLearningExecution candidate = new XxlLearningExecution();
         candidate.setExecutionKey(executionKey);
         candidate.setHandlerName(handlerName);
@@ -66,7 +49,6 @@ public class XxlJobTransactionService {
         candidate.setJobId(context.getJobId());
         candidate.setLogId(context.getLogId());
         candidate.setLogDateTime(context.getLogDateTime());
-        candidate.setLogFileName(context.getLogFileName());
         candidate.setShardIndex(context.getShardIndex());
         candidate.setShardTotal(context.getShardTotal());
         return executionMapper.claim(candidate, leaseSeconds);
@@ -78,15 +60,15 @@ public class XxlJobTransactionService {
         return executionMapper.selectByExecutionKey(executionKey);
     }
 
-    /** 收口本 Handler 全部过期观察台账，避免进程硬崩溃留下永久 RUNNING。 */
+    /** 关闭过期的分片处理台账。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
-    public int closeExpiredProcessExecutions() {
-        return executionMapper.closeExpiredRunning(
-                "xxlProcessWorkItemsJobHandler",
+    public void closeExpiredProcessExecutions() {
+        executionMapper.closeExpiredRunning(
+                XxlJobNames.PROCESS_WORK_ITEMS,
                 "Executor在租约内未完成本轮回写，后续周期将过期观察台账收口为FAILED");
     }
 
-    /** 故意失败必须先在独立事务留下 FAILED 事实，外层随后抛异常也不能把它回滚。 */
+    /** 在独立事务中记录执行失败。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public void failExecution(XxlLearningExecution execution, String error) {
         int affected = executionMapper.markFailed(
@@ -94,7 +76,7 @@ public class XxlJobTransactionService {
         BusinessAssert.isTrue(affected == 1, "执行租约已失效，不能写入失败状态");
     }
 
-    /** 没有额外业务副作用的重试演示，可以直接在这个短事务内提交 SUCCESS。 */
+    /** 在独立事务中记录执行成功。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public void succeedExecution(XxlLearningExecution execution, String result) {
         int affected = executionMapper.markSuccess(
@@ -102,10 +84,15 @@ public class XxlJobTransactionService {
         BusinessAssert.isTrue(affected == 1, "执行租约已失效，不能写入成功状态");
     }
 
-    /**
-     * 聚合、版本写入和租约终结必须在同一个事务中提交。
-     * 若聚合期间租约过期并已被其他 Worker 接管，最后的条件 UPDATE 会影响 0 行并让整笔日报写入回滚。
-     */
+    /** 续期当前执行权；租约已过期时拒绝恢复。 */
+    @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
+    public void renewExecutionLease(XxlLearningExecution execution, int leaseSeconds) {
+        int affected = executionMapper.renewLease(
+                execution.getId(), execution.getLeaseToken(), leaseSeconds);
+        BusinessAssert.isTrue(affected == 1, "执行租约已过期或被其他执行器接管");
+    }
+
+    /** 在同一事务中生成日报并完成执行台账。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningOrderSummary writeDailySummary(
             DailyOrderSummaryJobParam param, XxlLearningExecution execution) {
@@ -119,8 +106,8 @@ public class XxlJobTransactionService {
         summary.setExecutionId(execution.getId());
 
         int changed = orderSummaryMapper.upsertHigherVersion(summary);
-        XxlLearningOrderSummary current = orderSummaryMapper.selectByDate(param.getBusinessDate());
-        BusinessAssert.notNull(current, "订单日报写入后未找到数据");
+        XxlLearningOrderSummary current = BusinessAssert.notNull(
+                orderSummaryMapper.selectByDate(param.getBusinessDate()), "订单日报写入后未找到数据");
         BusinessAssert.isTrue(current.getRunVersion() <= param.getRunVersion(),
                 "该业务日已存在更高版本日报，当前低版本不能覆盖");
 
@@ -133,10 +120,7 @@ public class XxlJobTransactionService {
         return current;
     }
 
-    /**
-     * 批次、全部工作项和执行 SUCCESS 在一个事务内生成，避免只创建半个批次。
-     * 同 batchKey 同参数是幂等重放；同 key 参数不同则明确拒绝。
-     */
+    /** 在同一事务中生成批次、工作项和成功状态。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningBatch generateBatch(
             GenerateWorkBatchJobParam param, XxlLearningExecution execution) {
@@ -148,15 +132,12 @@ public class XxlJobTransactionService {
         candidate.setGeneratedExecutionId(execution.getId());
         batchMapper.insertIfAbsent(candidate);
 
-        XxlLearningBatch batch = batchMapper.selectByBatchKey(param.getBatchKey());
-        BusinessAssert.notNull(batch, "工作批次创建失败");
-        // 显式判空并拆箱后比较业务值，避免数据库脏数据在这里表现成难懂的自动拆箱 NPE。
-        BusinessAssert.isTrue(batch.getItemCount() != null
-                        && batch.getItemCount().intValue() == param.getItemCount()
-                        && batch.getFailEvery() != null
-                        && batch.getFailEvery().intValue() == param.getFailEvery()
-                        && batch.getFailTimes() != null
-                        && batch.getFailTimes().intValue() == param.getFailTimes(),
+        XxlLearningBatch batch = BusinessAssert.notNull(
+                batchMapper.selectByBatchKey(param.getBatchKey()), "工作批次创建失败");
+        // 同一 batchKey 不能混用不同生成参数。
+        BusinessAssert.isTrue(batch.getItemCount() == param.getItemCount()
+                        && batch.getFailEvery() == param.getFailEvery()
+                        && batch.getFailTimes() == param.getFailTimes(),
                 "相同batchKey已经绑定不同生成参数，不能混用两次实验");
 
         workItemMapper.insertGeneratedItems(
@@ -171,24 +152,38 @@ public class XxlJobTransactionService {
         return batch;
     }
 
-    /** 每轮先把“最后一次处理中崩溃”的过期项目收口，再原子领取当前分片的一小批工作。 */
+    /** 收口过期工作项并领取当前分片的一批任务。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
-    public List<XxlLearningWorkItem> claimWorkItems(
+    public WorkItemClaim claimWorkItems(
             ProcessWorkItemsJobParam param, XxlJobRunContext context) {
-        validateShard(context);
-        workItemMapper.closeExpiredExhausted(
-                param.getBatchKey(), param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
-                "最后一次尝试期间租约过期，周期扫描将工作项收口为DEAD");
-        workItemMapper.closeRetryWaitExhausted(
-                param.getBatchKey(), param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
-                "处理参数中的maxAttempts已不大于既有尝试次数，周期扫描将工作项收口为DEAD");
-        return workItemMapper.claimShardItems(
-                param.getBatchKey(), param.getBatchSize(), UUID.randomUUID().toString(),
+        Set<Long> affectedBatchIds = new HashSet<>();
+        affectedBatchIds.addAll(workItemMapper.closeExpiredExhausted(
+                param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
+                "最后一次尝试期间租约过期，周期扫描将工作项收口为DEAD"));
+        affectedBatchIds.addAll(workItemMapper.closeRetryWaitExhausted(
+                param.getMaxAttempts(), context.getShardIndex(), context.getShardTotal(),
+                "处理参数中的maxAttempts已不大于既有尝试次数，周期扫描将工作项收口为DEAD"));
+        List<XxlLearningWorkItem> items = workItemMapper.claimShardItems(
+                param.getBatchSize(), UUID.randomUUID().toString(),
                 param.getLeaseSeconds(), context.getJobId(), context.getLogId(), param.getMaxAttempts(),
                 context.getShardIndex(), context.getShardTotal());
+        items.forEach(item -> affectedBatchIds.add(item.getBatchId()));
+        return new WorkItemClaim(items, affectedBatchIds);
     }
 
-    /** 计划失败只推进当前工作项；单项事务失败不应回滚同一轮其他工作项的结果。 */
+    /** 在同一短事务中续期本轮执行权和即将处理的工作项。 */
+    @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
+    public void renewProcessingLeases(
+            XxlLearningExecution execution, XxlLearningWorkItem item, int leaseSeconds) {
+        BusinessAssert.isTrue(executionMapper.renewLease(
+                        execution.getId(), execution.getLeaseToken(), leaseSeconds) == 1,
+                "执行租约已过期或被其他执行器接管");
+        BusinessAssert.isTrue(workItemMapper.renewLease(
+                        item.getId(), item.getLeaseToken(), leaseSeconds) == 1,
+                "工作项租约已过期或被其他执行器接管");
+    }
+
+    /** 在独立事务中记录单个工作项失败。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public void failWorkItem(XxlLearningWorkItem item, ProcessWorkItemsJobParam param) {
         String error = "学习案例计划失败，第" + item.getAttemptCount() + "次尝试";
@@ -202,10 +197,7 @@ public class XxlJobTransactionService {
         BusinessAssert.isTrue(affected == 1, "工作项租约已失效，失败推进未生效");
     }
 
-    /**
-     * 唯一结果与工作项 SUCCESS 同事务提交。
-     * 结果 INSERT 因重复影响 0 行时仍继续条件终结，支持“结果曾成功但工作项终态未知”的安全恢复。
-     */
+    /** 在同一事务中写入唯一结果并完成工作项。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public void succeedWorkItem(
             XxlLearningWorkItem item, XxlLearningExecution execution, XxlJobRunContext context) {
@@ -224,29 +216,27 @@ public class XxlJobTransactionService {
                 "工作项租约已失效，结果写入和状态更新已一起回滚");
     }
 
-    /** 刷新使用全表状态计数；本轮领取 0 行不代表批次已经完成。 */
+    /** 根据全部工作项刷新批次状态。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW)
     public XxlLearningBatch refreshBatch(long batchId) {
-        // 先锁批次行。后来的分片必须等前一事务提交后再执行后面的 counts 查询，不能拿旧快照回退状态。
+        // 锁定批次，防止并发分片用旧快照回退状态。
         BusinessAssert.notNull(batchMapper.selectByIdForUpdate(batchId), "工作批次不存在");
         return BusinessAssert.notNull(batchMapper.refreshStatusReturning(batchId), "工作批次不存在");
     }
 
+    /** 查询仍需周期驱动的批次。 */
     @Transactional(transactionManager = "playgroundTransactionManager", propagation = Propagation.REQUIRES_NEW,
             readOnly = true)
-    public XxlLearningBatch getBatch(String batchKey) {
-        return BusinessAssert.notNull(batchMapper.selectByBatchKey(batchKey), "工作批次不存在");
-    }
-
-    private void validateShard(XxlJobRunContext context) {
-        BusinessAssert.isTrue(context.getShardTotal() > 0, "shardTotal必须大于0");
-        BusinessAssert.isTrue(context.getShardIndex() >= 0
-                        && context.getShardIndex() < context.getShardTotal(),
-                "shardIndex必须位于[0, shardTotal)范围内");
+    public List<Long> listActiveBatchIds() {
+        return batchMapper.selectActiveIds();
     }
 
     private String truncate(String value) {
         String normalized = value == null || value.isBlank() ? "未提供原因" : value;
         return normalized.substring(0, Math.min(normalized.length(), 1000));
+    }
+
+    /** 一轮领取的工作项及需要刷新状态的批次。 */
+    public record WorkItemClaim(List<XxlLearningWorkItem> items, Set<Long> affectedBatchIds) {
     }
 }

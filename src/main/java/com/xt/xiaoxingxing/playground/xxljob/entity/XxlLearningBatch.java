@@ -5,7 +5,7 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 
-/** 一组可由固定逻辑桶分片处理的工作项。 */
+/** 分片工作批次。 */
 @Data
 public class XxlLearningBatch {
     private Long id;

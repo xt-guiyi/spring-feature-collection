@@ -67,7 +67,6 @@ public void execute() {
 - `jobId`：Admin 中任务配置的 ID；
 - `logId`：本次调度日志 ID，每次人工触发和重试都可能不同；
 - `logDateTime`：本次调度时间；
-- `logFileName`：本次 Executor Rolling Log 文件；
 - `shardIndex/shardTotal`：分片广播时当前分片序号和总数；
 - `jobParam`：Admin 配置或人工触发时传入的字符串参数。
 
@@ -171,12 +170,8 @@ MySQL 的两个初始化脚本只在 `xxl_job_mysql_data` 为空时执行：
 
 ### 3.3 启动第一个 Executor
 
-IDE 启动应用前增加环境变量：
-
-```text
-XXL_JOB_EXECUTOR_ENABLED=true
-XXL_JOB_ACCESS_TOKEN=xxl-job-learning-token
-```
+IDE 使用 `dev` Profile 启动应用即可。Executor 默认随应用创建，开发环境的 Admin 地址、AccessToken、
+注册地址和端口已经在 YAML 中配置。
 
 默认通信路径是：
 
@@ -195,7 +190,6 @@ Admin   -> http://host.docker.internal:19999
 
 ```text
 SERVER_PORT=4379
-XXL_JOB_EXECUTOR_ENABLED=true
 XXL_JOB_EXECUTOR_PORT=19999
 XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:19999
 ```
@@ -204,7 +198,6 @@ XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:19999
 
 ```text
 SERVER_PORT=4380
-XXL_JOB_EXECUTOR_ENABLED=true
 XXL_JOB_EXECUTOR_PORT=20000
 XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:20000
 ```
@@ -226,7 +219,7 @@ XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:20000
 | 1007 | 每日订单汇总 | `xxlDailyOrderSummaryJobHandler` | 调度日期、版本化幂等 |
 | 1008 | 手工重算日报 | `xxlDailyOrderSummaryJobHandler` | 指定日期、高版本覆盖 |
 | 1009 | 生成工作批次 | `xxlGenerateWorkBatchJobHandler` | 父任务、幂等造数 |
-| 1010 | 分片处理工作项 | `xxlProcessWorkItemsJobHandler` | 5 秒周期续跑、分片、SKIP LOCKED、租约、结果唯一键 |
+| 1010 | 分片处理工作项 | `xxlProcessWorkItemsJobHandler` | 扫描全部未完成批次、分片、SKIP LOCKED、租约、结果唯一键 |
 
 ### 4.1 基础任务
 
@@ -337,7 +330,7 @@ XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:20000
 - `batchKey` 是稳定业务键；
 - 同参数重复生成不会重复插入工作项；
 - 相同 `batchKey` 配不同参数会失败，避免悄悄混合两次实验；
-- 父任务成功后，Admin 触发 ID `1010` 子任务。
+- 父任务成功后，Admin 触发 ID `1010` 通用处理任务；处理任务扫描全部未终结批次，不依赖父任务参数传递。
 
 父任务与子任务不是一个数据库事务。父任务成功只表示子任务得到了第一次调度机会，子任务仍必须重新读取 PostgreSQL 工作项。
 由于 1010 每轮最多领取 `batchSize` 条，而且失败项要等到 `retryDelaySeconds` 后才能再次领取，单次子任务触发不可能保证
@@ -346,9 +339,8 @@ XXL_JOB_EXECUTOR_ADDRESS=http://host.docker.internal:20000
 观察到批次进入 `SUCCESS`、`PARTIAL_SUCCESS` 或 `FAILED` 后，应在 Admin 停止 1010；代码会跳过终态批次，
 但一直启用固定频率仍会让 Admin 持续产生没有业务工作的调度日志。
 
-同一个 `batchKey` 的处理阶段也应固定 `maxAttempts`、`leaseSeconds` 和 `retryDelaySeconds`。第一版把这组参数放在
-Admin 任务配置中而不是批次表里，因此批次处理中途不要修改它们；生产系统通常会把处理策略或策略版本随批次持久化，
-并拒绝同一业务批次发生策略漂移。
+处理阶段应固定 `maxAttempts`、`leaseSeconds` 和 `retryDelaySeconds`。当前通用处理任务把这组参数放在 Admin 配置中，
+会统一作用于所有未终结批次，因此批次处理中途不要修改它们；生产系统通常会把处理策略或策略版本随批次持久化。
 
 `maxAttempts` 是每个工作项的总尝试上限，不是“计划失败后的额外次数”。因此若生成参数 `failTimes=20`，处理参数却是
 `maxAttempts=5`，该工作项会在第 5 次按设计进入 `DEAD`，不会等到第 21 次成功。要演示最终成功，应满足
@@ -358,7 +350,6 @@ Admin 任务配置中而不是批次表里，因此批次处理中途不要修�
 
 ```json
 {
-  "batchKey": "learning-batch-001",
   "batchSize": 20,
   "maxAttempts": 5,
   "leaseSeconds": 60,
@@ -366,7 +357,7 @@ Admin 任务配置中而不是批次表里，因此批次处理中途不要修�
 }
 ```
 
-任务使用固定 64 个逻辑桶：
+任务会扫描所有 `READY/PROCESSING/RETRY_WAIT` 批次，并使用固定 64 个逻辑桶：
 
 ```text
 bucket_no = 工作项稳定哈希落桶结果
@@ -381,6 +372,9 @@ FOR UPDATE SKIP LOCKED
 ```
 
 然后在短事务内将候选工作项改为 `RUNNING` 并生成租约令牌。这样多个 Executor 可以并行领取，又不会互相等待同一批已锁定行。
+
+一轮会先批量领取，再逐项处理。每项真正开始前会检查线程中断，并同时续期执行台账和工作项租约；如果排队期间租约已经
+过期或被其他 Executor 接管，本轮会停止，不能继续提交旧 Worker 的结果。`leaseSeconds` 仍应覆盖单个工作项的最长处理时间。
 
 这里把“每轮只取 20 条”和“每 5 秒再调度一轮”组合起来：前者限制单次占用时间，后者负责持续驱动。
 如果只配置父任务的一次 `child_jobid` 触发、却没有周期扫描或其他可靠续触发，剩余工作项会永久停留，不能称为完整批处理。
@@ -466,7 +460,7 @@ XXL-JOB 提供的是至少可能重复的任务触发环境，不提供业务 ex
 - 带状态条件的原子更新；
 - 短事务领取与租约过期接管；
 - 外部 API 的幂等键；
-- 发送消息时的 Outbox。
+- 当前 RocketMQ 案例使用事务消息，并以持久事务记录支撑 Broker 回查。
 
 ## 7. 租约为什么必须带令牌
 
@@ -495,11 +489,11 @@ WHERE id = :id
 
 按顺序检查：
 
-1. `XXL_JOB_EXECUTOR_ENABLED` 是否为 `true`；
-2. Executor 日志中是否成功访问 `http://127.0.0.1:18083`；
-3. Admin 与 Executor 的 AccessToken 是否完全一致；
-4. Admin 地址是否误加了旧版 `/xxl-job-admin` 后缀；
-5. AppName 是否与预置执行器组一致。
+1. Executor 日志中是否成功访问 `http://127.0.0.1:18083`；
+2. Admin 与 Executor 的 AccessToken 是否完全一致；
+3. Admin 地址是否误加了旧版 `/xxl-job-admin` 后缀；
+4. AppName 是否与预置执行器组一致；
+5. Executor 的内嵌端口是否被其他进程占用。
 
 ### 8.2 在线但触发失败
 
