@@ -30,7 +30,9 @@ buildNumber.properties
 .mvn/wrapper/maven-wrapper.jar
 
 # IDE
-.idea/
+.idea/*
+!.idea/runConfigurations/
+!.idea/runConfigurations/**
 *.iml
 *.ipr
 *.iws
