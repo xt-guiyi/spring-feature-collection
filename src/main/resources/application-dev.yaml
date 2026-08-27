@@ -3,17 +3,17 @@ server:
 
 spring:
   elasticsearch:
-    uris: http://localhost:9200
+    uris: http://104.199.166.106:9200
     connection-timeout: 3s
     socket-timeout: 30s
   output:
     ansi:
       enabled: always
   mongodb:
-    uri: mongodb://root:123456@localhost:27017/mongo_playground?authSource=admin
+    uri: mongodb://root:123456@104.199.166.106:27017/mongo_playground?authSource=admin
   data:
     redis:
-      host: localhost
+      host: 104.199.166.106
       port: 6379
       username: ""
       password: ""
@@ -24,12 +24,12 @@ spring:
         enabled: false
   datasource:
     business:
-      url: jdbc:postgresql://localhost:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai
+      url: jdbc:postgresql://104.199.166.106:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai
       username: root
       password: 123456
       driver-class-name: org.postgresql.Driver
     playground:
-      url: jdbc:postgresql://localhost:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai
+      url: jdbc:postgresql://104.199.166.106:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai
       username: root
       password: 123456
       driver-class-name: org.postgresql.Driver
@@ -38,11 +38,11 @@ application:
   cors:
     enabled: true
     allowed-origins:
-      - http://localhost:5173
+      - http://104.199.166.106:5173
 
 rocketmq:
   producer:
-    endpoints: localhost:18081
+    endpoints: 104.199.166.106:18081
     access-key: ""
     secret-key: ""
     namespace: ""
@@ -51,7 +51,7 @@ rocketmq:
 xxl:
   job:
     admin:
-      addresses: http://127.0.0.1:18083
+      addresses: http://104.199.166.106:18083
       access-token: xxl-job-learning-token
     executor:
       address: http://host.docker.internal:19999

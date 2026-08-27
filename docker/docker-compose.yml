@@ -62,8 +62,12 @@ services:
     environment:
       # 单节点模式，不加入 Elasticsearch 集群。
       discovery.type: single-node
-      # 关闭 Elasticsearch 认证和 TLS；仅适合本机学习。
-      xpack.security.enabled: "false"
+      # 开启 Elasticsearch 用户认证和权限控制。
+      xpack.security.enabled: "true"
+      # 学习环境暂不启用 HTTPS；生产环境应进一步配置 TLS。
+      xpack.security.http.ssl.enabled: "false"
+      # 首次初始化或重置 elastic 用户时使用的密码。
+      ELASTIC_PASSWORD: 123456
       # 设置 JVM 堆内存的最小值和最大值，避免无限占用内存。
       ES_JAVA_OPTS: -Xms512m -Xmx512m
     ports:
@@ -75,7 +79,7 @@ services:
       # test：执行健康检查的命令；命令退出码为 0 才表示健康。
       test:
         - CMD-SHELL
-        - curl --silent --fail http://localhost:9200/_cluster/health >/dev/null || exit 1
+        - curl --silent --fail -u elastic:123456 http://localhost:9200/_cluster/health >/dev/null || exit 1
       # interval：两次健康检查之间的间隔。
       interval: 10s
       # timeout：单次检查允许执行的最长时间。
@@ -96,8 +100,13 @@ services:
     environment:
       # Kibana 容器内通过 Compose 服务名访问 Elasticsearch。
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
-      # 与 Elasticsearch 保持一致，关闭 Kibana 安全认证。
-      XPACK_SECURITY_ENABLED: "false"
+      # Kibana 使用专用的 kibana_system 用户访问 Elasticsearch。
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: 123456
+      # 固定密钥，避免 Kibana 重启后会话和保存对象失效；仅适合学习环境。
+      XPACK_SECURITY_ENCRYPTIONKEY: spring-feature-collection-kibana-key-123456
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: spring-feature-collection-saved-key-123456
+      XPACK_REPORTING_ENCRYPTIONKEY: spring-feature-collection-report-key-123456
     ports:
       - "5601:5601"
     depends_on:
