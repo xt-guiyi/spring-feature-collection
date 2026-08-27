@@ -205,7 +205,7 @@ services:
     ports:
       - "9876:9876"
     volumes:
-      - rocketmq_nameserver_logs:/home/rocketmq/logs
+      - rocketmq_nameserver_logs:/home/rocketmq/logs/rocketmqlogs
     networks:
       - rocketmq-network
 
@@ -230,7 +230,7 @@ services:
       - "10912:10912"
     volumes:
       - rocketmq_broker_store:/home/rocketmq/store
-      - rocketmq_broker_logs:/home/rocketmq/logs
+      - rocketmq_broker_logs:/home/rocketmq/logs/rocketmqlogs
     depends_on:
       - rocketmq-nameserver
     networks:
@@ -261,7 +261,7 @@ services:
       - "18080:8080"
       - "18081:8081"
     volumes:
-      - rocketmq_proxy_logs:/home/rocketmq/logs
+      - rocketmq_proxy_logs:/home/rocketmq/logs/rocketmqlogs
     depends_on:
       - rocketmq-nameserver
       - rocketmq-broker
