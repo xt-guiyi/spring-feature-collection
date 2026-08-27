@@ -2,6 +2,12 @@ server:
   port: 3379
 
 spring:
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:}
+    password: ${ELASTICSEARCH_PASSWORD:}
+    connection-timeout: 3s
+    socket-timeout: 30s
   output:
     ansi:
       enabled: always

@@ -18,5 +18,4 @@ public final class OrderMqConstants {
     public static final String CONSUMER_GROUP_ORDER_STATISTICS = "order_statistics_group";
     public static final String CONSUMER_GROUP_TIMEOUT_SCHEDULER = "timeout_scheduler_group";
     public static final String CONSUMER_GROUP_ORDER_TIMEOUT = "order_timeout_group";
-
 }

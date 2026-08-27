@@ -2,6 +2,10 @@ server:
   port: 4379
 
 spring:
+  elasticsearch:
+    uris: http://localhost:9200
+    connection-timeout: 3s
+    socket-timeout: 30s
   output:
     ansi:
       enabled: always

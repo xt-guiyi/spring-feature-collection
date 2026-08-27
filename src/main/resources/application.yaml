@@ -50,6 +50,17 @@ application:
     group: playground
     display-name: playground
 
+playground:
+  elasticsearch:
+    vector-dimensions: 8
+    max-page-size: 50
+    max-bulk-size: 100
+    pit-keep-alive: 1m
+    default-k: 5
+    default-num-candidates: 50
+    number-of-shards: 1
+    number-of-replicas: 0
+
 xxl:
   job:
     admin:
