@@ -18,9 +18,42 @@
         <encoder>
             <pattern>${CONSOLE_LOG_PATTERN}</pattern>
         </encoder>
+    </appender>m p
+
+
+    <appender name="FILE"
+              class="ch.qos.logback.core.rolling.RollingFileAppender">
+
+        <!-- 当前日志和历史日志统一保存到固定目录。 -->
+        <file>/Users/xiongtao/Documents/logs/spring-feature-collection/application.log</file>
+
+        <encoder>
+            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+        </encoder>
+
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+<!--            <fileNamePattern>-->
+<!--                logs/spring-feature-collection.%d{yyyy-MM-dd}.%i.log.gz-->
+<!--            </fileNamePattern>-->
+
+            <!-- 历史日志也固定保存在这个目录 -->
+            <fileNamePattern>
+                /Users/xiongtao/Documents/logs/spring-feature-collection/application.%d{yyyy-MM-dd}.%i.log.gz
+            </fileNamePattern>
+
+            <!-- 单个日志文件最大 100MB -->
+            <maxFileSize>100MB</maxFileSize>
+
+            <!-- 日志最多保留 30 天 -->
+            <maxHistory>30</maxHistory>
+
+            <!-- 所有日志文件总大小最多 1GB -->
+            <totalSizeCap>1GB</totalSizeCap>
+        </rollingPolicy>
     </appender>
 
     <root level="${ROOT_LOG_LEVEL}">
         <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE"/>
     </root>
 </configuration>

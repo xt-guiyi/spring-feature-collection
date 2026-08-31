@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://xiaoxingxing.com/playground/flowable">
+
+    <process id="leaveApprovalProcess" name="请假审批学习流程" isExecutable="true">
+        <documentation>演示 DMN 路由、候选人领取、并行多实例、审批聚合和嵌入式子流程。</documentation>
+
+        <startEvent id="startEvent" name="提交申请"/>
+        <sequenceFlow id="flow_start_route" sourceRef="startEvent" targetRef="determineApprovalRoute"/>
+
+        <serviceTask id="determineApprovalRoute" name="确定审批路线（DMN）"
+                     flowable:delegateExpression="${leaveRouteDecisionDelegate}"/>
+        <sequenceFlow id="flow_route_gateway" sourceRef="determineApprovalRoute" targetRef="routeGateway"/>
+
+        <exclusiveGateway id="routeGateway" name="审批路线" default="flow_route_manager"/>
+        <!-- 默认路线为 MANAGER；default 顺序流不能再配置 conditionExpression。 -->
+        <sequenceFlow id="flow_route_manager" sourceRef="routeGateway" targetRef="managerApproval"/>
+        <sequenceFlow id="flow_route_manager_hr" sourceRef="routeGateway" targetRef="parallelApproval">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approvalRoute == 'MANAGER_HR'}]]></conditionExpression>
+        </sequenceFlow>
+        <sequenceFlow id="flow_route_manager_hr_leader" sourceRef="routeGateway" targetRef="parallelApproval">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${approvalRoute == 'MANAGER_HR_LEADER'}]]></conditionExpression>
+        </sequenceFlow>
+
+        <userTask id="managerApproval" name="经理审批"
+                  flowable:candidateUsers="${managerId}"
+                  flowable:formKey="leaveApproval"/>
+        <sequenceFlow id="flow_manager_aggregate" sourceRef="managerApproval" targetRef="aggregateApproval"/>
+
+        <userTask id="parallelApproval" name="并行审批"
+                  flowable:candidateUsers="${approverId}"
+                  flowable:formKey="leaveApproval">
+            <multiInstanceLoopCharacteristics isSequential="false"
+                                              flowable:collection="${approvalUserIds}"
+                                              flowable:elementVariable="approverId">
+                <completionCondition><![CDATA[${nrOfCompletedInstances == nrOfInstances}]]></completionCondition>
+            </multiInstanceLoopCharacteristics>
+        </userTask>
+        <sequenceFlow id="flow_parallel_aggregate" sourceRef="parallelApproval" targetRef="aggregateApproval"/>
+
+        <serviceTask id="aggregateApproval" name="汇总审批结果"
+                     flowable:delegateExpression="${leaveApprovalAggregateDelegate}"/>
+        <sequenceFlow id="flow_aggregate_final_gateway" sourceRef="aggregateApproval" targetRef="finalGateway"/>
+
+        <exclusiveGateway id="finalGateway" name="最终决定" default="flow_final_reject"/>
+        <sequenceFlow id="flow_final_approve" sourceRef="finalGateway" targetRef="approvedSubProcess">
+            <conditionExpression xsi:type="tFormalExpression"><![CDATA[${finalDecision == 'APPROVE'}]]></conditionExpression>
+        </sequenceFlow>
+        <!-- 默认决定为 REJECT；default 顺序流不能再配置 conditionExpression。 -->
+        <sequenceFlow id="flow_final_reject" sourceRef="finalGateway" targetRef="finalizeLeave"/>
+
+        <subProcess id="approvedSubProcess" name="通过后处理子流程">
+            <documentation>通过分支的嵌入式子流程，展示可复用的业务后处理边界。</documentation>
+            <startEvent id="approvedSubStart" name="开始通过后处理"/>
+            <sequenceFlow id="flow_approved_record" sourceRef="approvedSubStart" targetRef="recordApproved"/>
+            <serviceTask id="recordApproved" name="记录通过结果"
+                         flowable:delegateExpression="${leaveApprovedRecordDelegate}"/>
+            <sequenceFlow id="flow_approved_notify" sourceRef="recordApproved" targetRef="prepareNotification"/>
+            <serviceTask id="prepareNotification" name="准备申请人通知"
+                         flowable:delegateExpression="${leaveNotificationPrepareDelegate}"/>
+            <sequenceFlow id="flow_approved_end" sourceRef="prepareNotification" targetRef="approvedSubEnd"/>
+            <endEvent id="approvedSubEnd" name="通过后处理结束"/>
+        </subProcess>
+        <sequenceFlow id="flow_subprocess_finalize" sourceRef="approvedSubProcess" targetRef="finalizeLeave"/>
+
+        <serviceTask id="finalizeLeave" name="同步请假业务状态"
+                     flowable:delegateExpression="${leaveProcessFinalizeDelegate}"/>
+        <sequenceFlow id="flow_finalize_end" sourceRef="finalizeLeave" targetRef="endEvent"/>
+        <endEvent id="endEvent" name="流程结束"/>
+    </process>
+</definitions>

@@ -42,6 +42,13 @@ application:
     allowed-origins:
       - http://localhost:5173
 
+# prod 显式启用本模块需要的两个引擎；其余通用参数继承 application.yaml。
+flowable:
+  process:
+    enabled: true
+  dmn:
+    enabled: true
+
 rocketmq:
   producer:
     endpoints: localhost:18081

@@ -36,6 +36,10 @@
 		<rocketmq-spring.version>2.3.6</rocketmq-spring.version>
 		<!-- XXL-JOB 3.4.2 的官方构建基线与本项目一致：Spring Boot 4.1 / JDK 17+。 -->
 		<xxl-job.version>3.4.2</xxl-job.version>
+		<!-- Flowable 8.0.0：BPMN 流程与 DMN 决策表学习模块。 -->
+		<flowable.version>8.0.0</flowable.version>
+		<!-- Drools 10.2 使用 JDK 21 作为推荐运行环境。 -->
+		<drools.version>10.2.0</drools.version>
 	</properties>
 	<dependencies>
 		<!--
@@ -46,6 +50,40 @@
 			<groupId>com.xuxueli</groupId>
 			<artifactId>xxl-job-core</artifactId>
 			<version>${xxl-job.version}</version>
+		</dependency>
+		<!-- Flowable BPMN 流程引擎自动配置与 Spring 集成。 -->
+		<dependency>
+			<groupId>org.flowable</groupId>
+			<artifactId>flowable-spring-boot-starter-process</artifactId>
+			<version>${flowable.version}</version>
+		</dependency>
+		<!-- Flowable DMN 决策表引擎，与请假流程的路由决策配合使用。 -->
+		<dependency>
+			<groupId>org.flowable</groupId>
+			<artifactId>flowable-spring-boot-starter-dmn</artifactId>
+			<version>${flowable.version}</version>
+		</dependency>
+		<!-- 8.0.0 自动配置中直接使用的 ProcessEngineConfigurator 实现（starter 未传递可选依赖）。 -->
+		<dependency>
+			<groupId>org.flowable</groupId>
+			<artifactId>flowable-spring-configurator</artifactId>
+			<version>${flowable.version}</version>
+		</dependency>
+		<!-- 8.0.0 自动配置中直接使用的 DMN configurator 实现（starter 未传递可选依赖）。 -->
+		<dependency>
+			<groupId>org.flowable</groupId>
+			<artifactId>flowable-dmn-spring-configurator</artifactId>
+			<version>${flowable.version}</version>
+		</dependency>
+		<!-- Flyway 数据库迁移学习模块：由 Spring Boot 在启动时执行版本化 SQL。 -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<!-- Flyway 12 将 PostgreSQL 支持拆为独立数据库扩展。 -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
 		</dependency>
 		<!--
 			RocketMQ 5.x 可靠消息学习模块：
@@ -60,6 +98,24 @@
 			<groupId>org.apache.rocketmq</groupId>
 			<artifactId>rocketmq-v5-client-spring-boot-starter</artifactId>
 			<version>${rocketmq-spring.version}</version>
+		</dependency>
+		<!-- Drools 订单规则学习模块：规则文件从 classpath 加载到内嵌 KIE 容器。 -->
+		<dependency>
+			<groupId>org.drools</groupId>
+			<artifactId>drools-engine</artifactId>
+			<version>${drools.version}</version>
+		</dependency>
+		<!-- Drools 10 单独提供 kmodule.xml 解析支持，用它注册 orderRuleBase 和 orderRuleSession。 -->
+		<dependency>
+			<groupId>org.drools</groupId>
+			<artifactId>drools-xml-support</artifactId>
+			<version>${drools.version}</version>
+		</dependency>
+		<!-- 当前应用在运行时直接编译 classpath 中的 DRL，需要 Drools 的 MVEL 约束实现。 -->
+		<dependency>
+			<groupId>org.drools</groupId>
+			<artifactId>drools-mvel</artifactId>
+			<version>${drools.version}</version>
 		</dependency>
 		<!-- MongoDB 动态问卷学习模块：同步 Repository + MongoTemplate。 -->
 		<dependency>
@@ -85,7 +141,7 @@
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>3.1.0</version>
+			<version>3.0.3</version>
 		</dependency>
 		<dependency>
 			<groupId>org.redisson</groupId>
@@ -138,7 +194,11 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-	</dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+    </dependencies>
 
 	<build>
 		<plugins>

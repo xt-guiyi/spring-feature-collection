@@ -26,7 +26,8 @@ import java.util.List;
         basePackages = {
                 "com.xt.xiaoxingxing.playground.postgresql.mapper",
                 "com.xt.xiaoxingxing.playground.rocketmq.mapper",
-                "com.xt.xiaoxingxing.playground.xxljob.mapper"
+                "com.xt.xiaoxingxing.playground.xxljob.mapper",
+                "com.xt.xiaoxingxing.playground.flowable.mapper"
         },
         sqlSessionFactoryRef = "playgroundSqlSessionFactory"
 )

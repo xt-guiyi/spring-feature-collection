@@ -4,6 +4,8 @@ server:
 spring:
   elasticsearch:
     uris: http://104.199.166.106:9200
+    username: elastic
+    password: 123456
     connection-timeout: 3s
     socket-timeout: 30s
   output:
@@ -39,6 +41,13 @@ application:
     enabled: true
     allowed-origins:
       - http://104.199.166.106:5173
+
+# dev 显式启用本模块需要的两个引擎；其余通用参数继承 application.yaml。
+flowable:
+  process:
+    enabled: true
+  dmn:
+    enabled: true
 
 rocketmq:
   producer:

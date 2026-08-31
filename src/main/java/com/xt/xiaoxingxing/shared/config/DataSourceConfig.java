@@ -1,5 +1,6 @@
 package com.xt.xiaoxingxing.shared.config;
 
+import org.springframework.boot.flyway.autoconfigure.FlywayDataSource;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceProperties;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -41,7 +42,12 @@ public class DataSourceConfig {
         return businessDataSourceProperties.initializeDataSourceBuilder().build();
     }
 
-    /** 使用 playground 前缀创建供两套 PostgreSQL 学习入口共同使用的连接池。 */
+    /**
+     * 使用 playground 前缀创建供学习模块共同使用的连接池。
+     * {@link FlywayDataSource} 明确告诉 Spring Boot：Flyway 只能在 demo 库执行迁移，
+     * 不要因为 businessDataSource 是 {@link Primary} 就误迁移主库。
+     */
+    @FlywayDataSource
     @Bean(name = "playgroundDataSource")
     public DataSource playgroundDataSource(
             @Qualifier("playgroundDataSourceProperties") DataSourceProperties playgroundDataSourceProperties) {

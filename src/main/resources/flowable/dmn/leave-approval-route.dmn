@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/DMN/20151101"
+             id="leaveApprovalRouteDefinitions"
+             name="请假审批路线"
+             namespace="http://xiaoxingxing.com/playground/flowable/dmn">
+    <decision id="leaveApprovalRoute" name="请假审批路线决策">
+        <description>根据请假天数决定审批人集合和并行审批数量。</description>
+        <decisionTable id="leaveApprovalRouteTable" hitPolicy="FIRST">
+            <input label="请假天数">
+                <inputExpression id="leaveDaysExpression" typeRef="number">
+                    <text>leaveDays</text>
+                </inputExpression>
+            </input>
+            <output id="approvalRouteOutput" label="审批路线" name="approvalRoute" typeRef="string"/>
+            <output id="requiredRolesOutput" label="所需角色" name="requiredRoles" typeRef="string"/>
+            <output id="requiredCountOutput" label="审批人数" name="requiredApprovalCount" typeRef="number"/>
+
+            <rule id="leaveDaysOneToTwo">
+                <inputEntry id="leaveDaysOneToTwoInput"><text>&lt;= 2</text></inputEntry>
+                <outputEntry id="leaveDaysOneToTwoRoute"><text>"MANAGER"</text></outputEntry>
+                <outputEntry id="leaveDaysOneToTwoRoles"><text>"MANAGER"</text></outputEntry>
+                <outputEntry id="leaveDaysOneToTwoCount"><text>1</text></outputEntry>
+            </rule>
+            <rule id="leaveDaysThreeToFive">
+                <!-- FIRST 命中策略已先排除 <=2，第二条写 <=5 可兼容 Flowable 8 的一元测试解析器。 -->
+                <inputEntry id="leaveDaysThreeToFiveInput"><text>&lt;= 5</text></inputEntry>
+                <outputEntry id="leaveDaysThreeToFiveRoute"><text>"MANAGER_HR"</text></outputEntry>
+                <outputEntry id="leaveDaysThreeToFiveRoles"><text>"MANAGER,HR"</text></outputEntry>
+                <outputEntry id="leaveDaysThreeToFiveCount"><text>2</text></outputEntry>
+            </rule>
+            <rule id="leaveDaysSixToThirty">
+                <inputEntry id="leaveDaysSixToThirtyInput"><text>&gt; 5</text></inputEntry>
+                <outputEntry id="leaveDaysSixToThirtyRoute"><text>"MANAGER_HR_LEADER"</text></outputEntry>
+                <outputEntry id="leaveDaysSixToThirtyRoles"><text>"MANAGER,HR,LEADER"</text></outputEntry>
+                <outputEntry id="leaveDaysSixToThirtyCount"><text>3</text></outputEntry>
+            </rule>
+        </decisionTable>
+    </decision>
+</definitions>

@@ -23,6 +23,9 @@ public interface ArticleSearchService {
     /** 按标题前缀返回文章补全建议。 */
     List<String> suggestions(String prefix, int size);
 
+    /** 使用 completion suggester 按标题前缀返回文章补全建议。 */
+    List<String> completionSuggestions(String prefix, int size);
+
     /** 使用游标深分页检索文章。 */
     ArticleCursorPageVO cursor(ArticleCursorRequest request);
 

@@ -183,7 +183,17 @@ CREATE INDEX idx_mq_transaction_status_created
 
 INSERT INTO users (username, email, phone, status) VALUES
 ('zhangsan', 'zhangsan@example.com', '13800138000', 'ACTIVE'),
-('lisi', 'lisi@example.com', '13900139000', 'ACTIVE');
+('lisi', 'lisi@example.com', '13900139000', 'ACTIVE'),
+('wangwu', 'wangwu@example.com', '13700139001', 'ACTIVE'),
+('zhaoliu', 'zhaoliu@example.com', '13700139002', 'ACTIVE'),
+('sunqi', 'sunqi@example.com', '13700139003', 'ACTIVE'),
+('zhouba', 'zhouba@example.com', '13700139004', 'ACTIVE'),
+('wujiu', 'wujiu@example.com', '13700139005', 'ACTIVE'),
+('zhengshi', 'zhengshi@example.com', '13700139006', 'ACTIVE'),
+('heyi', 'heyi@example.com', '13700139007', 'ACTIVE'),
+('linshi', 'linshi@example.com', '13700139008', 'ACTIVE'),
+('chenba', 'chenba@example.com', '13700139009', 'ACTIVE'),
+('gaojiu', 'gaojiu@example.com', '13700139010', 'ACTIVE');
 
 INSERT INTO id_cards (user_id, card_number, real_name) VALUES
 (1, '110101199001011234', '张三'),

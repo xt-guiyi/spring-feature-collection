@@ -62,6 +62,16 @@ public class ArticleSearchController {
         return Result.ok(articleSearchService.suggestions(prefix, size));
     }
 
+    /** 使用 completion suggester 按标题开头返回文章补全建议。 */
+    @GetMapping("/completion-suggestions")
+    public Result<List<String>> completionSuggestions(
+            @RequestParam @NotBlank(message = "补全前缀不能为空")
+            @Size(max = 100, message = "补全前缀长度不能超过100") String prefix,
+            @RequestParam(defaultValue = "5") @Min(value = 1, message = "补全数量必须大于0")
+            @Max(value = 10, message = "补全数量不能超过10") int size) {
+        return Result.ok(articleSearchService.completionSuggestions(prefix, size));
+    }
+
     /** 使用游标深分页检索文章。 */
     @PostMapping("/cursor")
     public Result<ArticleCursorPageVO> cursor(@Valid @RequestBody ArticleCursorRequest request) {

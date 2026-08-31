@@ -23,9 +23,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       # PostgreSQL 官方镜像只在数据目录为空时，按文件名字典序执行初始化脚本。
-      # 10 创建业务学习表和示例数据，20 创建 XXL-JOB 执行器侧的业务状态表。
+      # 10 创建业务学习表和示例数据，20 创建 XXL-JOB 执行器侧的业务状态表，
+      # 30 创建 Flowable 8.0.0 BPMN/DMN 引擎表及请假业务表。
       - ./init/postgres/10-schema-demo.sql:/docker-entrypoint-initdb.d/10-schema-demo.sql:ro
       - ./init/postgres/20-xxl-job-learning-schema.sql:/docker-entrypoint-initdb.d/20-xxl-job-learning-schema.sql:ro
+      - ./init/postgres/30-flowable-learning-schema.sql:/docker-entrypoint-initdb.d/30-flowable-learning-schema.sql:ro
 
 
   # redis：Redis 内存数据库及缓存服务。

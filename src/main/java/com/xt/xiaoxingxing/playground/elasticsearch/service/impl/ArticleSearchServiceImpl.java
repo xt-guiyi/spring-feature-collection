@@ -40,6 +40,7 @@ import com.xt.xiaoxingxing.playground.elasticsearch.vo.ArticleCursorPageVO;
 import com.xt.xiaoxingxing.playground.elasticsearch.vo.ArticleSearchHitVO;
 import com.xt.xiaoxingxing.shared.common.PageResult;
 import com.xt.xiaoxingxing.shared.exception.BusinessException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 @Service
 public class ArticleSearchServiceImpl implements ArticleSearchService {
 
@@ -119,6 +121,7 @@ public class ArticleSearchServiceImpl implements ArticleSearchService {
                                 HighlightField.of(field -> field.fragmentSize(180).numberOfFragments(3)))))
                 .build();
         SearchResponse<ArticleDocument> response = executeSearch(searchRequest, "查询 Elasticsearch 文章失败");
+        log.info("搜索结果: {} ", response);
         List<ArticleSearchHitVO> hits = mapHits(response.hits().hits());
         return pageResult(hits, totalHits(response), pageNum, pageSize);
     }
@@ -159,9 +162,58 @@ public class ArticleSearchServiceImpl implements ArticleSearchService {
                 viewCountStats(requireAggregate(aggregations, VIEW_COUNT_STATS_AGG)));
     }
 
-    /** 按标题前缀返回文章补全建议。 */
+    /**
+     * 搜索标题中的联想内容并返回文章标题。
+     *
+     * <p>不同查询方式的适用场景：</p>
+     * <ul>
+     *     <li>{@code completion}：适合从开头补全。</li>
+     *     <li>{@code match}：适合搜索分词后的词语。</li>
+     *     <li>{@code wildcard}：适合搜索任意位置包含的内容，但性能成本较高。</li>
+     *     <li>{@code search_as_you_type}：适合更完整的输入联想。</li>
+     * </ul>
+     *
+     * <p>当前方法使用 {@code wildcard}，在 {@code title.keyword} 上构造
+     * {@code *关键词*}，因此输入标题中间的内容也可以匹配。</p>
+     */
     @Override
     public List<String> suggestions(String prefix, int size) {
+        if (prefix == null || prefix.isBlank()) {
+            throw new BusinessException("补全前缀不能为空");
+        }
+        if (size <= 0 || size > 10) {
+            throw new BusinessException("补全数量必须在1到10之间");
+        }
+        articleIndexGuard.requireAlias();
+
+        SearchRequest searchRequest = indexedSearch()
+                .size(size)
+                .query(Query.of(query -> query.wildcard(wildcard -> wildcard
+                        .field(ElasticsearchConstants.FIELD_TITLE + ".keyword")
+                        .value("*" + prefix.trim() + "*")
+                        .caseInsensitive(true))))
+                .build();
+        SearchResponse<ArticleDocument> response = executeSearch(searchRequest, "查询 Elasticsearch 标题补全失败");
+        log.info("搜索结果： {}", response);
+        Set<String> values = new LinkedHashSet<>();
+        for (Hit<ArticleDocument> hit : response.hits().hits()) {
+            ArticleDocument source = hit.source();
+            if (source != null && source.getTitle() != null && !source.getTitle().isBlank()) {
+                values.add(source.getTitle());
+            }
+            if (values.size() == size) {
+                return List.copyOf(values);
+            }
+        }
+        return List.copyOf(values);
+    }
+
+    /**
+     * 使用 completion suggester 按标题开头返回文章补全建议。
+     * completion 只能匹配输入前缀，不能匹配标题中间的内容；中间内容匹配由 wildcard 版本负责。
+     */
+    @Override
+    public List<String> completionSuggestions(String prefix, int size) {
         if (prefix == null || prefix.isBlank()) {
             throw new BusinessException("补全前缀不能为空");
         }
@@ -179,7 +231,10 @@ public class ArticleSearchServiceImpl implements ArticleSearchService {
                                 .size(size)
                                 .skipDuplicates(true))))
                 .build();
-        SearchResponse<ArticleDocument> response = executeSearch(searchRequest, "查询 Elasticsearch 标题补全失败");
+        SearchResponse<ArticleDocument> response = executeSearch(
+                searchRequest, "查询 Elasticsearch 标题 completion 补全失败");
+        log.info("completion 补全结果：{}", response);
+
         List<Suggestion<ArticleDocument>> suggestions = response.suggest().getOrDefault(
                 TITLE_SUGGESTION, List.of());
         Set<String> values = new LinkedHashSet<>();

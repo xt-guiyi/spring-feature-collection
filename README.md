@@ -3,6 +3,7 @@
 - Java 21
 - Spring Boot 4.1.0
 - Maven
+- PostgreSQL / Flyway
 - Redis
 - Lombok
 - Jakarta Validation
@@ -32,6 +33,10 @@ src/main/java/com/xt/xiaoxingxing/
     ├── vo/                          # 视图对象（可选）
     └── enums/                       # 模块内枚举
 ```
+
+## 模块入口
+
+- [Flyway 数据库迁移模块](src/main/java/com/xt/xiaoxingxing/playground/migration/README.md)：在现有 `demo` 库的 `flyway_migration` schema 中演示 V1→V5 版本化迁移。
 
 ## 配置文件
 
