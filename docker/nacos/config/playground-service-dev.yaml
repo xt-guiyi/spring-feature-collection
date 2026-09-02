@@ -1,0 +1,128 @@
+# Nacos dataId: playground-service-dev.yaml
+# group: SPRING_FEATURE_COLLECTION
+server:
+  port: 4379
+
+spring:
+  mongodb:
+    database: playground
+  data:
+    mongodb:
+      auto-index-creation: true
+      representation:
+        big-decimal: decimal128
+  datasource:
+    business:
+      url: "jdbc:postgresql://104.199.166.106:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai"
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
+    playground:
+      url: "jdbc:postgresql://104.199.166.106:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai"
+      username: root
+      password: 123456
+      driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:features/migration/db/migration
+    schemas: flyway_migration
+    default-schema: flyway_migration
+    create-schemas: true
+    table: flyway_schema_history
+application:
+  mybatis:
+    mapper-locations:
+      playground:
+        - classpath*:features/**/mapper/**/*.xml
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+    pagination-db-type: POSTGRE_SQL
+  redis:
+    lock:
+      wait-time: 3s
+      lease-time: 10s
+      simulated-work-duration: 1s
+
+  open-api:
+    title: API 文档
+    version: 1.0.0
+    description: 项目接口文档
+    group: playground
+    display-name: playground
+
+playground:
+  elasticsearch:
+    vector-dimensions: 8
+    max-page-size: 50
+    max-bulk-size: 100
+    pit-keep-alive: 1m
+    default-k: 5
+    default-num-candidates: 50
+    number-of-shards: 1
+    number-of-replicas: 0
+  order-mq:
+    order-timeout-millis: 100000
+    transaction-prepared-timeout-seconds: 120
+    transaction-cleanup-batch-size: 50
+    product-cache-ttl-seconds: 300
+
+flowable:
+  database-schema-update: false
+  check-process-definitions: true
+  history-level: audit
+  db-history-used: true
+  jpa-enabled: false
+  rest-api-enabled: false
+  async-executor-activate: false
+  async-history-executor-activate: false
+  process:
+    enabled: true
+    async-history:
+      enable: false
+    definition-location-prefix: classpath*:/features/flowable/processes/
+    definition-location-suffixes: ["**.bpmn20.xml", "**.bpmn"]
+  dmn:
+    enabled: true
+    deploy-resources: true
+    resource-location: classpath*:/features/flowable/dmn/
+    resource-suffixes: ["**.dmn", "**.dmn.xml", "**.dmn11", "**.dmn11.xml"]
+    history-enabled: true
+  app:
+    enabled: false
+  cmmn:
+    enabled: false
+  db-identity-used: false
+  idm:
+    enabled: false
+  eventregistry:
+    enabled: false
+
+shared:
+  infrastructure:
+    redis:
+      enabled: true
+    elasticsearch:
+      enabled: true
+    mongodb:
+      enabled: true
+    rocketmq:
+      enabled: true
+
+xxl:
+  job:
+    admin:
+      addresses: "http://104.199.166.106:18083"
+      access-token: xxl-job-token
+      timeout: 3
+    executor:
+      appname: spring-feature-collection-executor
+      address: ""
+      ip: ""
+      port: 19999
+      log-path: /tmp/xxl-job/jobhandler
+      log-retention-days: 7
+      excluded-package: org.springframework,spring
+
+feign:
+  sentinel:
+    enabled: true

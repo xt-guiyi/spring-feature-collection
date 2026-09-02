@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.flowable.mapper.FlowableLeaveRequestMapper">
+
+    <sql id="requestColumns">
+        id, request_no AS requestNo, applicant_id AS applicantId, manager_id AS managerId,
+        hr_id AS hrId, leader_id AS leaderId, leave_days AS leaveDays, leave_type AS leaveType,
+        reason, approval_route AS approvalRoute, process_instance_id AS processInstanceId,
+        status, final_decision AS finalDecision, final_comment AS finalComment,
+        created_at AS createdAt, updated_at AS updatedAt
+    </sql>
+
+    <insert id="insert" parameterType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveRequest"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO flowable_leave_request (
+            request_no, applicant_id, manager_id, hr_id, leader_id, leave_days, leave_type,
+            reason, approval_route, status, created_at, updated_at
+        ) VALUES (
+            #{requestNo}, #{applicantId}, #{managerId}, #{hrId}, #{leaderId}, #{leaveDays}, #{leaveType},
+            #{reason}, #{approvalRoute}, 'RUNNING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <select id="selectById" resultType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveRequest">
+        SELECT <include refid="requestColumns"/>
+        FROM flowable_leave_request
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByRequestNo" resultType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveRequest">
+        SELECT <include refid="requestColumns"/>
+        FROM flowable_leave_request
+        WHERE request_no = #{requestNo}
+    </select>
+
+    <update id="updateProcessInstanceId">
+        UPDATE flowable_leave_request
+        SET process_instance_id = #{processInstanceId}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND process_instance_id IS NULL
+    </update>
+
+    <update id="updateApproversAndRoute">
+        UPDATE flowable_leave_request
+        SET manager_id = #{managerId}, hr_id = #{hrId}, leader_id = #{leaderId},
+            approval_route = #{approvalRoute}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND status = 'RUNNING'
+    </update>
+
+    <update id="updateFinalDecision">
+        UPDATE flowable_leave_request
+        SET status = #{status}, final_decision = #{finalDecision}, final_comment = #{finalComment},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND status = 'RUNNING'
+    </update>
+
+    <sql id="requestFilters">
+        <where>
+            <if test="requestNo != null and requestNo != ''">
+                request_no = #{requestNo}
+            </if>
+            <if test="applicantId != null">
+                AND applicant_id = #{applicantId}
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+        </where>
+    </sql>
+
+    <select id="selectPage" resultType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveRequest">
+        SELECT <include refid="requestColumns"/>
+        FROM flowable_leave_request
+        <include refid="requestFilters"/>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(*) FROM flowable_leave_request
+        <include refid="requestFilters"/>
+    </select>
+</mapper>

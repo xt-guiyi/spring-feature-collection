@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.postgresql.mapper.PgMyBatisRelationMapper">
+
+    <!-- id_cards 是一对一关系表，当前示例由 user_id 唯一约束保证每个用户只有一张身份证记录。 -->
+    <sql id="idCardColumns">
+        id, user_id AS userId, card_number AS cardNumber, real_name AS realName
+    </sql>
+
+    <!-- order_products 是多对多中间表，并额外保存下单快照中的数量与成交单价。 -->
+    <sql id="orderProductColumns">
+        id, order_id AS orderId, product_id AS productId, quantity, unit_price AS unitPrice
+    </sql>
+
+    <!-- INSERT ... RETURNING 是 PostgreSQL 特性，结果直接作为 Mapper 的 Long 返回值。 -->
+    <select id="insertIdCard"
+            parameterType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgIdCard"
+            resultType="java.lang.Long"
+            affectData="true"
+            flushCache="true">
+        INSERT INTO id_cards (user_id, card_number, real_name)
+        VALUES (#{userId}, #{cardNumber}, #{realName})
+        RETURNING id
+    </select>
+
+    <select id="selectIdCardById" resultType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgIdCard">
+        SELECT <include refid="idCardColumns"/>
+        FROM id_cards
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAllIdCards" resultType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgIdCard">
+        SELECT <include refid="idCardColumns"/>
+        FROM id_cards
+        ORDER BY id ASC
+    </select>
+
+    <!-- set 标签自动处理末尾逗号，实现仅修改请求中非空字段。 -->
+    <update id="updateIdCard" parameterType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgIdCard">
+        UPDATE id_cards
+        <set>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="cardNumber != null">card_number = #{cardNumber},</if>
+            <if test="realName != null">real_name = #{realName},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteIdCardById">
+        DELETE FROM id_cards WHERE id = #{id}
+    </delete>
+
+    <!-- 关联表通常对 (order_id, product_id) 建唯一约束，防止同一商品重复占两行。 -->
+    <select id="insertOrderProduct"
+            parameterType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgOrderProduct"
+            resultType="java.lang.Long"
+            affectData="true"
+            flushCache="true">
+        INSERT INTO order_products (order_id, product_id, quantity, unit_price)
+        VALUES (#{orderId}, #{productId}, #{quantity}, #{unitPrice})
+        RETURNING id
+    </select>
+
+    <select id="selectOrderProductById"
+            resultType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgOrderProduct">
+        SELECT <include refid="orderProductColumns"/>
+        FROM order_products
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAllOrderProducts"
+            resultType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgOrderProduct">
+        SELECT <include refid="orderProductColumns"/>
+        FROM order_products
+        ORDER BY id ASC
+    </select>
+
+    <!-- 局部更新允许单独调整数量或成交价；正数/非负校验位于 Service。 -->
+    <update id="updateOrderProduct"
+            parameterType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgOrderProduct">
+        UPDATE order_products
+        <set>
+            <if test="orderId != null">order_id = #{orderId},</if>
+            <if test="productId != null">product_id = #{productId},</if>
+            <if test="quantity != null">quantity = #{quantity},</if>
+            <if test="unitPrice != null">unit_price = #{unitPrice},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteOrderProductById">
+        DELETE FROM order_products WHERE id = #{id}
+    </delete>
+
+    <!-- 单条 INSERT 搭配多组 VALUES，保证一批订单明细只进行一次数据库往返。 -->
+    <insert id="batchInsertOrderProducts">
+        INSERT INTO order_products (order_id, product_id, quantity, unit_price)
+        VALUES
+        <foreach collection="items" item="item" separator=",">
+            (#{item.orderId}, #{item.productId}, #{item.quantity}, #{item.unitPrice})
+        </foreach>
+    </insert>
+
+</mapper>

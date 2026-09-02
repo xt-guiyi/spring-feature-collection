@@ -1,0 +1,21 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="UserApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" singleton="false" nameIsGenerated="true">
+    <envs>
+      <env name="NACOS_NAMESPACE" value="e7e276aa-ddfa-4a1c-85b3-b676cba8d829" />
+      <env name="NACOS_SERVER_ADDR" value="104.199.166.106:8848" />
+      <env name="spring.profiles.active" value="dev" />
+    </envs>
+    <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
+    <module name="user" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="com.xt.xiaoxingxing.user.UserApplication" />
+    <extension name="coverage">
+      <pattern>
+        <option name="PATTERN" value="com.xt.xiaoxingxing.user.*" />
+        <option name="ENABLED" value="true" />
+      </pattern>
+    </extension>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

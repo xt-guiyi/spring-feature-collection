@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.xxljob.mapper.XxlWorkResultMapper">
+
+    <insert id="insertIfAbsent" parameterType="com.xt.xiaoxingxing.playground.features.xxljob.entity.XxlWorkResult"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO xxl_work_result (
+            work_item_id, batch_id, item_no, execution_id, result_value,
+            job_id, log_id, shard_index, shard_total, created_at
+        ) VALUES (
+            #{workItemId}, #{batchId}, #{itemNo}, #{executionId}, #{resultValue},
+            #{jobId}, #{logId}, #{shardIndex}, #{shardTotal}, CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (work_item_id) DO NOTHING
+    </insert>
+
+    <sql id="resultFilters">
+        <where><if test="batchKey != null and batchKey != ''">batch.batch_key = #{batchKey}</if></where>
+    </sql>
+
+    <select id="selectPage" resultType="com.xt.xiaoxingxing.playground.features.xxljob.entity.XxlWorkResult">
+        SELECT result.id, result.work_item_id AS workItemId, result.batch_id AS batchId,
+               result.item_no AS itemNo, result.execution_id AS executionId,
+               result.result_value AS resultValue, result.job_id AS jobId, result.log_id AS logId,
+               result.shard_index AS shardIndex, result.shard_total AS shardTotal,
+               result.created_at AS createdAt
+        FROM xxl_work_result result
+        JOIN xxl_batch batch ON batch.id = result.batch_id
+        <include refid="resultFilters"/>
+        ORDER BY result.created_at DESC, result.id DESC LIMIT #{pageSize} OFFSET #{offset}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(*) FROM xxl_work_result result
+        JOIN xxl_batch batch ON batch.id = result.batch_id
+        <include refid="resultFilters"/>
+    </select>
+</mapper>

@@ -1,0 +1,50 @@
+package rules.order;
+
+import com.xt.xiaoxingxing.playground.features.drools.fact.OrderRuleFact;
+import java.math.BigDecimal;
+
+global java.util.List appliedRules;
+
+rule "VIP_HIGH_VALUE_DISCOUNT"
+    salience 20
+when
+    $order: OrderRuleFact(vip == true, highValue == true, discountApplied == false)
+then
+    modify($order) {
+        setDiscountRate(new BigDecimal("0.90"))
+    };
+    appliedRules.add("VIP_HIGH_VALUE_DISCOUNT");
+end
+
+rule "NEW_USER_DISCOUNT"
+    salience 20
+when
+    $order: OrderRuleFact(newUser == true, vip == false, discountApplied == false)
+then
+    modify($order) {
+        setDiscountRate(new BigDecimal("0.95"))
+    };
+    appliedRules.add("NEW_USER_DISCOUNT");
+end
+
+rule "LARGE_ORDER_FREE_SHIPPING"
+    salience 10
+when
+    $order: OrderRuleFact(highValue == true, shippingFeeCharged == true)
+then
+    modify($order) {
+        setShippingFee(BigDecimal.ZERO)
+    };
+    appliedRules.add("LARGE_ORDER_FREE_SHIPPING");
+end
+
+rule "CALCULATE_FINAL_AMOUNT"
+    salience -10
+when
+    $order: OrderRuleFact(finalAmount == null)
+then
+    modify($order) {
+        setFinalAmount($order.calculateFinalAmount())
+    };
+    appliedRules.add("CALCULATE_FINAL_AMOUNT");
+end

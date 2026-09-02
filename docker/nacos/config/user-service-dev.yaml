@@ -1,0 +1,33 @@
+# Nacos dataId: user-service-dev.yaml
+# group: SPRING_FEATURE_COLLECTION
+server:
+  # 端口 0 表示由操作系统为每个实例自动分配空闲端口，支持同一模块启动多个实例。
+  port: 0
+
+shared:
+  infrastructure:
+    # 用户服务当前只使用 PostgreSQL，不启用这些公共中间件配置。
+    redis:
+      enabled: false
+    elasticsearch:
+      enabled: false
+    mongodb:
+      enabled: false
+    rocketmq:
+      enabled: false
+
+spring:
+  datasource:
+    url: jdbc:postgresql://104.199.166.106:5432/user_db?options=-c%20TimeZone%3DAsia%2FShanghai
+    username: root
+    password: 123456
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false

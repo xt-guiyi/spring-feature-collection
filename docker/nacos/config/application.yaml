@@ -1,0 +1,68 @@
+# Nacos dataId: application.yaml
+# group: SPRING_FEATURE_COLLECTION
+logging:
+  level:
+    root: INFO
+    web: INFO
+  pattern:
+      console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr(%-5level) %clr(---){faint} %clr([%15.15thread]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %msg%n"
+
+# 公共中间件连接配置。服务只有在自身配置开启对应开关后，才会加载 shared 提供的公共 Bean。
+shared:
+  infrastructure:
+    redis:
+      enabled: false
+    elasticsearch:
+      enabled: false
+    mongodb:
+      enabled: false
+    rocketmq:
+      enabled: false
+
+spring:
+  output:
+    ansi:
+      enabled: always
+  mongodb:
+    host: 104.199.166.106
+    port: 27017
+    username: "root"
+    password: "123456"
+    authentication-database: "admin"
+  data:
+    redis:
+      host: 104.199.166.106
+      port: 6379
+      database: 0
+      timeout: 3s
+      connect-timeout: 3s
+      ssl:
+        enabled: false
+  elasticsearch:
+    uris: "http://104.199.166.106:9200"
+    username: elastic
+    password: 123456
+    connection-timeout: 3s
+    socket-timeout: 30s
+  flyway:
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    clean-disabled: true
+  cloud:
+    openfeign:
+      client:
+        config:
+          user-service:
+            connect-timeout: 3000
+            read-timeout: 5000
+            logger-level: basic
+rocketmq:
+  producer:
+    endpoints: "104.199.166.106:18081"
+    ssl-enabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.rocketmq.mapper.MqTransactionRecordMapper">
+
+    <sql id="transactionColumns">
+        transaction_id AS transactionId,
+        status,
+        last_error AS lastError,
+        created_at AS createdAt,
+        updated_at AS updatedAt
+    </sql>
+
+    <insert id="insertPrepared" parameterType="com.xt.xiaoxingxing.playground.features.rocketmq.entity.MqTransactionRecord">
+        INSERT INTO mq_transaction_record (
+            transaction_id, status,
+            last_error, created_at, updated_at
+        ) VALUES (
+            #{transactionId}, 'PREPARED',
+            #{lastError}, COALESCE(#{createdAt}, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+        )
+    </insert>
+
+    <update id="markCommitted">
+        UPDATE mq_transaction_record
+        SET status = 'COMMITTED',
+            last_error = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE transaction_id = #{transactionId}
+          AND status = 'PREPARED'
+    </update>
+
+    <update id="markRolledBack">
+        UPDATE mq_transaction_record
+        SET status = 'ROLLED_BACK',
+            last_error = #{lastError},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE transaction_id = #{transactionId}
+          AND status = 'PREPARED'
+    </update>
+
+    <select id="selectExpiredPreparedCandidates"
+            resultType="com.xt.xiaoxingxing.playground.features.rocketmq.entity.MqTransactionRecord">
+        SELECT <include refid="transactionColumns"/>
+        FROM mq_transaction_record
+        WHERE status = 'PREPARED'
+          AND created_at &lt;= #{expiredBefore}
+        ORDER BY created_at ASC, transaction_id ASC
+        LIMIT #{batchSize}
+    </select>
+
+    <select id="selectById" resultType="com.xt.xiaoxingxing.playground.features.rocketmq.entity.MqTransactionRecord">
+        SELECT <include refid="transactionColumns"/>
+        FROM mq_transaction_record
+        WHERE transaction_id = #{transactionId}
+    </select>
+
+</mapper>

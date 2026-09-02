@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: gateway-service
+  profiles:
+    default: dev
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${NACOS_NAMESPACE:}
+        group: SPRING_FEATURE_COLLECTION
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:123456}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        namespace: ${NACOS_NAMESPACE:}
+        group: SPRING_FEATURE_COLLECTION
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:123456}
+        file-extension: yaml
+        refresh-enabled: true
+  config:
+    import:
+      - nacos:application.yaml?group=SPRING_FEATURE_COLLECTION
+      - nacos:gateway-service-${spring.profiles.active:dev}.yaml?group=SPRING_FEATURE_COLLECTION

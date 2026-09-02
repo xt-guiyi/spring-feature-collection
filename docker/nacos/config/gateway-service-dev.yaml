@@ -1,0 +1,26 @@
+# Nacos dataId: gateway-service-dev.yaml
+# group: SPRING_FEATURE_COLLECTION
+server:
+  port: 8080
+
+spring:
+  cloud:
+    gateway:
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: false
+          routes:
+            - id: user-service
+              uri: lb://user-service
+              predicates:
+                - Path=/api/users/**
+            - id: playground-service
+              uri: lb://playground-service
+              predicates:
+                - Path=/api/playground/**
+
+gateway:
+  cors:
+    allowed-origins: "*"

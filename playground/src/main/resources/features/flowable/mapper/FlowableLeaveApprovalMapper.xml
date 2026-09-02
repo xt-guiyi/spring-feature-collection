@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.flowable.mapper.FlowableLeaveApprovalMapper">
+
+    <sql id="approvalColumns">
+        id, leave_request_id AS leaveRequestId, task_id AS taskId, approver_id AS approverId,
+        approver_role AS approverRole, decision, comment, completed_at AS completedAt,
+        created_at AS createdAt
+    </sql>
+
+    <insert id="insertIfAbsent"
+            parameterType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveApproval"
+            useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO flowable_leave_approval (
+            leave_request_id, task_id, approver_id, approver_role, decision, comment,
+            completed_at, created_at
+        ) VALUES (
+            #{leaveRequestId}, #{taskId}, #{approverId}, #{approverRole}, #{decision}, #{comment},
+            COALESCE(#{completedAt}, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
+        )
+        ON CONFLICT (task_id) DO NOTHING
+    </insert>
+
+    <select id="selectByTaskId" resultType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveApproval">
+        SELECT <include refid="approvalColumns"/>
+        FROM flowable_leave_approval
+        WHERE task_id = #{taskId}
+    </select>
+
+    <select id="selectByLeaveRequestId" resultType="com.xt.xiaoxingxing.playground.features.flowable.entity.FlowableLeaveApproval">
+        SELECT <include refid="approvalColumns"/>
+        FROM flowable_leave_approval
+        WHERE leave_request_id = #{leaveRequestId}
+        ORDER BY completed_at ASC, id ASC
+    </select>
+</mapper>

@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.xt.xiaoxingxing.playground.features.postgresql.mapper.PgMyBatisProductProfileMapper">
+
+    <!--
+        attributes 不是普通 VARCHAR，而是 PostgreSQL jsonb。显式 resultMap 可以告诉 MyBatis：
+        读取该列时使用 PgJsonbTypeHandler，把 JDBC JSON 文本转换成 Jackson JsonNode。
+    -->
+    <resultMap id="productProfileResultMap"
+               type="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgProductProfile">
+        <id property="id" column="id"/>
+        <result property="productId" column="product_id"/>
+        <result property="attributes"
+                column="attributes"
+                typeHandler="com.xt.xiaoxingxing.playground.features.postgresql.typehandler.PgJsonbTypeHandler"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="productProfileColumns">
+        id, product_id, attributes, created_at, updated_at
+    </sql>
+
+    <!--
+        PostgreSQL RETURNING 在一次数据库往返中返回 BIGSERIAL 主键。
+        写入参数显式指定 PgJsonbTypeHandler，使 JsonNode 以 PGobject(jsonb) 发送给 PostgreSQL。
+    -->
+    <select id="insertProfile"
+            parameterType="com.xt.xiaoxingxing.playground.features.postgresql.entity.PgProductProfile"
+            resultType="java.lang.Long"
+            affectData="true"
+            flushCache="true">
+        INSERT INTO product_profiles (product_id, attributes)
+        VALUES (
+            #{productId},
+            #{attributes,typeHandler=com.xt.xiaoxingxing.playground.features.postgresql.typehandler.PgJsonbTypeHandler}
+        )
+        RETURNING id
+    </select>
+
+    <select id="selectProfileById" resultMap="productProfileResultMap">
+        SELECT <include refid="productProfileColumns"/>
+        FROM product_profiles
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAllProfiles" resultMap="productProfileResultMap">
+        SELECT <include refid="productProfileColumns"/>
+        FROM product_profiles
+        ORDER BY id ASC
+    </select>
+
+    <!--
+        PostgreSQL 与 MySQL JSON 对照：
+        1. ->>：两者都有提取并返回文本的能力，但 JSON 路径写法不同。
+        2. @>：PostgreSQL JSONB 包含操作符，MySQL 不能原样使用，可用 JSON_CONTAINS。
+        3. jsonb_exists / ?：PostgreSQL 键存在判断；MySQL 可用 JSON_CONTAINS_PATH。
+        4. #>>：PostgreSQL 按 text[] 路径提取文本；MySQL 通常使用 JSON_EXTRACT/->>。
+        所以这里展示的是 PostgreSQL 更紧凑的操作符体系，不是说 MySQL 完全不能查询 JSON。
+    -->
+    <select id="selectProfilesByCondition"
+            parameterType="com.xt.xiaoxingxing.playground.features.postgresql.dto.request.ProductProfileSearchRequest"
+            resultMap="productProfileResultMap">
+        SELECT <include refid="productProfileColumns"/>
+        FROM product_profiles
+        <where>
+            <if test="brand != null and brand != ''">
+                AND attributes -&gt;&gt; 'brand' = #{brand}
+            </if>
+            <if test="tag != null and tag != ''">
+                AND attributes @&gt; jsonb_build_object('tags', jsonb_build_array(#{tag}))
+            </if>
+            <if test="requiredKey != null and requiredKey != ''">
+                AND jsonb_exists(attributes, #{requiredKey})
+            </if>
+            <if test="warrantyEnabled != null">
+                AND (attributes #&gt;&gt; '{warranty,enabled}')::boolean = #{warrantyEnabled}
+            </if>
+        </where>
+        ORDER BY id ASC
+    </select>
+
+    <!--
+        || 把右侧 JSON 对象合并到左侧顶层：同名 key 由右侧覆盖，其他 key 保留。
+        MySQL 不能原样使用 ||，但可使用 JSON_MERGE_PATCH 实现接近的对象合并语义。
+    -->
+    <update id="mergeAttributes">
+        UPDATE product_profiles
+        SET attributes = attributes || #{attributes,typeHandler=com.xt.xiaoxingxing.playground.features.postgresql.typehandler.PgJsonbTypeHandler},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <!--
+        jsonb_set 是 PostgreSQL 函数，MySQL 不能原样使用，但提供 JSON_SET。
+        这里先取得已有 warranty 对象；父对象不存在时用 {}，再只合并 months，避免覆盖 enabled。
+    -->
+    <update id="updateWarrantyMonths">
+        UPDATE product_profiles
+        SET attributes = jsonb_set(
+                attributes,
+                '{warranty}',
+                COALESCE(
+                    CASE
+                        WHEN jsonb_typeof(attributes -&gt; 'warranty') = 'object'
+                            THEN attributes -&gt; 'warranty'
+                    END,
+                    '{}'::jsonb
+                )
+                    || jsonb_build_object('months', #{months}),
+                true
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <!--
+        jsonb - text 删除一个顶层 key；MySQL 对应思路是 JSON_REMOVE(attributes, '$.key')。
+        WHERE 同时要求 key 存在，让影响行数 0 可以区分“属性不存在”这一业务情况。
+    -->
+    <update id="deleteAttribute">
+        UPDATE product_profiles
+        SET attributes = attributes - #{key},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND jsonb_exists(attributes, #{key})
+    </update>
+
+</mapper>

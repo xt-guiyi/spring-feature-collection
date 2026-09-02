@@ -1,0 +1,4 @@
+com.xt.xiaoxingxing.shared.infrastructure.redis.RedisAutoConfiguration
+com.xt.xiaoxingxing.shared.infrastructure.elasticsearch.ElasticsearchAutoConfiguration
+com.xt.xiaoxingxing.shared.infrastructure.mongodb.MongoAutoConfiguration
+com.xt.xiaoxingxing.shared.infrastructure.rocketmq.RocketMqAutoConfiguration
