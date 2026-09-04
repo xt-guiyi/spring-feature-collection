@@ -12,8 +12,8 @@ spring-feature-collection/
 
 `gateway` 不依赖 `shared`，避免 WebFlux 网关加载 shared 中的 WebMVC；`playground` 和 `user`
 仍按需使用 shared。Playground 内部继续按 `features/{feature}` 组织 Java 基础（`basics`）、
-代码设计（`codedesign`）、Flowable、Elasticsearch、MongoDB、Redis、RocketMQ、Drools、XXL-JOB、
-Flyway 和 PostgreSQL 学习代码。
+代码设计（`codedesign`）、设计模式（`designpatterns`）、Flowable、Elasticsearch、MongoDB、Redis、
+RocketMQ、Drools、XXL-JOB、Flyway 和 PostgreSQL 学习代码。
 
 ## 微服务组件
 

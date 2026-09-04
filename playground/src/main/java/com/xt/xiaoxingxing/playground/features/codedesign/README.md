@@ -79,5 +79,5 @@ dto/OrderResponseFormatter      features/order/api
 
 - `basics` 学习 Java 语法、集合、异步和并发等基础能力。
 - `codedesign` 学习如何用这些能力写出边界清楚、容易修改的代码。
-- 后续 `designpatterns` 再单独学习工厂、策略、观察者等设计模式。
+- [designpatterns](../designpatterns/README.md) 单独学习工厂、策略、观察者等 GoF 设计模式。
 - Redis 锁、Mongo 乐观锁、PostgreSQL 防超卖、RocketMQ、Sentinel 等分布式案例继续由现有 feature 演示。
