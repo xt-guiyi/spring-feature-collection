@@ -1,10 +1,14 @@
 package com.xt.xiaoxingxing.shared.web.exception;
 
+import com.alibaba.csp.sentinel.slots.block.BlockException;
+import com.alibaba.csp.sentinel.slots.block.degrade.DegradeException;
 import com.xt.xiaoxingxing.shared.core.exception.BusinessException;
 import com.xt.xiaoxingxing.shared.core.response.Result;
 import com.xt.xiaoxingxing.shared.core.response.ResultCode;
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import java.lang.reflect.UndeclaredThrowableException;
 import org.springframework.validation.BindException;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -42,16 +46,13 @@ public class GlobalExceptionHandler {
 
     /**
      * 处理 @RequestParam、@PathVariable 上的 @Min、@Positive 等方法参数校验。
-     *
-     * <p>MongoDB 问卷接口大量使用 expectedVersion 和分页参数，如果不单独处理，参数错误会落入
-     * 通用异常分支并被误报为系统错误。</p>
      */
     @ExceptionHandler({ConstraintViolationException.class, HandlerMethodValidationException.class})
     public Result<Void> handleMethodValidationException(Exception e) {
         String message = e instanceof ConstraintViolationException ex
                 ? ex.getConstraintViolations().stream()
                         .findFirst()
-                        .map(violation -> violation.getMessage())
+                        .map(ConstraintViolation::getMessage)
                         .orElse("参数校验失败")
                 : "参数校验失败";
         log.warn("方法参数校验失败: {}", message);
@@ -59,6 +60,32 @@ public class GlobalExceptionHandler {
         result.setCode(ResultCode.PARAM_ERROR.getCode());
         result.setMessage(message);
         return result;
+    }
+
+    @ExceptionHandler(BlockException.class)
+    public Result<Void> handleBlockException(BlockException e) {
+        if (e instanceof DegradeException) {
+            log.warn("熔断降级: {}", e.getClass().getSimpleName());
+            Result<Void> result = new Result<>();
+            result.setCode(503);
+            result.setMessage("服务熔断，请稍后重试");
+            return result;
+        }
+        log.warn("限流被拦截: {}", e.getClass().getSimpleName());
+        Result<Void> result = new Result<>();
+        result.setCode(429);
+        result.setMessage("请求过于频繁，请稍后重试");
+        return result;
+    }
+
+    @ExceptionHandler(UndeclaredThrowableException.class)
+    public Result<Void> handleUndeclaredThrowableException(UndeclaredThrowableException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof BlockException) {
+            return handleBlockException((BlockException) cause);
+        }
+        log.error("反射调用异常（未识别的限流包装异常）: ", e);
+        return Result.error(ResultCode.ERROR);
     }
 
     @ExceptionHandler(Exception.class)

@@ -10,25 +10,34 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/** 用户服务的用户接口统一由此 Controller 承载，服务间调用也复用同一组路径。 */
 @RestController
-@RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class UserController {
 
     private final UserService userService;
 
-    @PostMapping
+    @PostMapping("/api/users")
     public Result<UserResponse> create(@Valid @RequestBody UserCreateRequest request) {
         return Result.ok(userService.create(request));
     }
 
-    @GetMapping("/{id}")
-    public Result<UserResponse> getById(@PathVariable Long id) {
+    @GetMapping("/api/users/{id}")
+    public Result<UserResponse> getById(@PathVariable Long id) throws InterruptedException {
+        // 测试响应超时
+//        Thread.sleep(6000);
         return Result.ok(userService.getById(id));
     }
 
-    @GetMapping
+    @GetMapping("/api/users")
     public Result<List<UserResponse>> list() {
         return Result.ok(userService.list());
     }
+
+    @PostMapping("/api/users/batch")
+    public Result<List<UserResponse>> findByIds(
+            @RequestBody(required = false) List<Long> ids) {
+        return Result.ok(userService.findByIds(ids));
+    }
+
 }

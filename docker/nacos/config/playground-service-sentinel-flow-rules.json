@@ -1,0 +1,11 @@
+[
+  {
+    "resource": "playground-user-rate-limit-test",
+    "grade": 1,
+    "count": 2,
+    "limitApp": "default",
+    "strategy": 0,
+    "controlBehavior": 0,
+    "clusterMode": false
+  }
+]

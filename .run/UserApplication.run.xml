@@ -1,9 +1,18 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="UserApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" singleton="false" nameIsGenerated="true">
+  <configuration default="false" name="UserApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" singleton="true" nameIsGenerated="true">
     <envs>
-      <env name="NACOS_NAMESPACE" value="e7e276aa-ddfa-4a1c-85b3-b676cba8d829" />
-      <env name="NACOS_SERVER_ADDR" value="104.199.166.106:8848" />
+      <env name="ELASTICSEARCH_HOST" value="104.155.229.164" />
+      <env name="MONGODB_HOST" value="104.155.229.164" />
+      <env name="NACOS_NAMESPACE" value="xt" />
+      <env name="NACOS_SERVER_ADDR" value="104.155.229.164:8848" />
+      <env name="PLAYGROUND_BUSINESS_DB_HOST" value="104.155.229.164" />
+      <env name="PLAYGROUND_DB_HOST" value="104.155.229.164" />
+      <env name="REDIS_HOST" value="104.155.229.164" />
+      <env name="ROCKETMQ_HOST" value="104.155.229.164" />
+      <env name="SENTINEL_DASHBOARD" value="127.0.0.1:8858" />
       <env name="spring.profiles.active" value="dev" />
+      <env name="USER_DB_HOST" value="104.155.229.164" />
+      <env name="XXL_JOB_ADMIN_HOST" value="104.155.229.164" />
     </envs>
     <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
     <module name="user" />

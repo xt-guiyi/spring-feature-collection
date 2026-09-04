@@ -17,8 +17,13 @@ shared:
       enabled: false
 
 spring:
+  cloud:
+    nacos:
+      discovery:
+        # 本机启动的服务注册为本机可达地址，避免被虚拟网卡地址 192.168.110.55 替代。
+        ip: ${NACOS_DISCOVERY_IP:192.168.2.216}
   datasource:
-    url: jdbc:postgresql://104.199.166.106:5432/user_db?options=-c%20TimeZone%3DAsia%2FShanghai
+    url: jdbc:postgresql://${USER_DB_HOST:104.155.229.164}:5432/user_db?options=-c%20TimeZone%3DAsia%2FShanghai
     username: root
     password: 123456
     driver-class-name: org.postgresql.Driver

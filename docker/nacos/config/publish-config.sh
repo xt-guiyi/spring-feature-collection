@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-NACOS_ADDR="${NACOS_ADDR:-http://104.199.166.106:8848}"
-NACOS_NAMESPACE="${NACOS_NAMESPACE:-e7e276aa-ddfa-4a1c-85b3-b676cba8d829}"
+NACOS_ADDR="${NACOS_ADDR:-http://104.155.229.164:8848}"
+NACOS_NAMESPACE="${NACOS_NAMESPACE:-xt}"
 NACOS_GROUP="${NACOS_GROUP:-SPRING_FEATURE_COLLECTION}"
 NACOS_USERNAME="${NACOS_USERNAME:-nacos}"
 NACOS_PASSWORD="${NACOS_PASSWORD:-123456}"
 CONFIG_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 auth_response="$(curl --fail-with-body --silent --show-error \
-  --request POST "${NACOS_ADDR}/nacos/v1/auth/login" \
+  --request POST "${NACOS_ADDR}/nacos/v3/auth/user/login" \
   --data-urlencode "username=${NACOS_USERNAME}" \
   --data-urlencode "password=${NACOS_PASSWORD}")"
 access_token="$(printf '%s' "$auth_response" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')"
@@ -18,16 +18,20 @@ if [[ -z "$access_token" ]]; then
   exit 1
 fi
 
-for config_file in "$CONFIG_DIR"/*.yaml; do
+for config_file in "$CONFIG_DIR"/*.yaml "$CONFIG_DIR"/*.json; do
   data_id="$(basename "$config_file")"
+  config_type="yaml"
+  if [[ "$config_file" == *.json ]]; then
+    config_type="json"
+  fi
   echo "发布 Nacos 配置: ${data_id}"
   curl --fail-with-body --silent --show-error \
-    --request POST "${NACOS_ADDR}/nacos/v1/cs/configs" \
+    --request POST "${NACOS_ADDR}/nacos/v3/admin/cs/config" \
+    --header "accessToken: ${access_token}" \
     --data-urlencode "dataId=${data_id}" \
-    --data-urlencode "group=${NACOS_GROUP}" \
-    --data-urlencode "tenant=${NACOS_NAMESPACE}" \
-    --data-urlencode "accessToken=${access_token}" \
-    --data-urlencode "type=yaml" \
+    --data-urlencode "groupName=${NACOS_GROUP}" \
+    --data-urlencode "namespaceId=${NACOS_NAMESPACE}" \
+    --data-urlencode "type=${config_type}" \
     --data-urlencode "content@${config_file}"
   echo
 done

@@ -163,6 +163,11 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
         </dependency>
+        <!-- Sentinel Nacos 规则数据源框架 -->
+        <dependency>
+            <groupId>com.alibaba.csp</groupId>
+            <artifactId>sentinel-datasource-nacos</artifactId>
+        </dependency>
         <!-- Spring Boot 开发工具框架 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

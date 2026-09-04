@@ -194,6 +194,20 @@ services:
     networks:
       - mysql-network
 
+  # sentinel-dashboard：Sentinel 流量控制规则的管理界面。
+  # 宿主机 8858 -> 容器 8858，本地 Spring 服务通过公网地址接入。
+  sentinel-dashboard:
+    image: bladex/sentinel-dashboard:1.8.9
+    container_name: sentinel-dashboard
+    restart: unless-stopped
+    environment:
+      SENTINEL_USERNAME: sentinel
+      SENTINEL_PASSWORD: sentinel
+    ports:
+      - "8858:8858"
+    networks:
+      - sentinel-network
+
   # rocketmq-nameserver：RocketMQ 的路由注册中心。
   # 只保存“Topic 在哪些 Broker 上”的路由信息，不负责保存业务消息。
   # Java 5.x gRPC 客户端也不会直接连这个 9876 端口，而是通过下面的 Proxy 接入。
@@ -333,3 +347,7 @@ networks:
   # RocketMQ 组件使用独立网络，通过服务名互相发现，不污染已有数据库服务的连接方式。
   rocketmq-network:
     name: rocketmq-network
+
+  # Sentinel Dashboard 独立网络；客户端通过服务器公网 8858 端口接入。
+  sentinel-network:
+    name: sentinel-network

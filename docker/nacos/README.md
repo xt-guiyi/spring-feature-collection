@@ -20,6 +20,7 @@ application.yaml
 gateway-service-dev.yaml
 playground-service-dev.yaml
 user-service-dev.yaml
+playground-service-sentinel-flow-rules.json
 ```
 
 数据库密码、外部中间件地址和 XXL-JOB token 通过运行服务时的环境变量提供，模板不保存真实凭据。

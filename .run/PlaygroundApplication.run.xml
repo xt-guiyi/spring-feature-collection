@@ -1,9 +1,22 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="PlaygroundApplication" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot" nameIsGenerated="true">
     <envs>
-      <env name="NACOS_NAMESPACE" value="e7e276aa-ddfa-4a1c-85b3-b676cba8d829" />
-      <env name="NACOS_SERVER_ADDR" value="104.199.166.106:8848" />
+      <env name="NACOS_NAMESPACE" value="xt" />
+      <env name="ELASTICSEARCH_HOST" value="104.155.229.164" />
+      <env name="MONGODB_HOST" value="104.155.229.164" />
+      <env name="NACOS_SERVER_ADDR" value="104.155.229.164:8848" />
+      <env name="PLAYGROUND_BUSINESS_DB_HOST" value="104.155.229.164" />
+      <env name="PLAYGROUND_DB_HOST" value="104.155.229.164" />
+      <env name="REDIS_HOST" value="104.155.229.164" />
+      <env name="ROCKETMQ_HOST" value="104.155.229.164" />
+      <env name="SENTINEL_DASHBOARD" value="104.155.229.164:8858" />
+      <env name="SENTINEL_CLIENT_IP" value="104.155.229.164" />
+      <env name="SENTINEL_TRANSPORT_PORT" value="8720" />
       <env name="spring.profiles.active" value="dev" />
+      <env name="XXL_JOB_EXECUTOR_IP" value="104.155.229.164" />
+      <env name="XXL_JOB_EXECUTOR_ADDRESS" value="http://104.155.229.164:19998" />
+      <env name="XXL_JOB_EXECUTOR_PORT" value="19999" />
+      <env name="XXL_JOB_ADMIN_HOST" value="104.155.229.164" />
     </envs>
     <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
     <module name="playground" />

@@ -24,14 +24,14 @@ spring:
     ansi:
       enabled: always
   mongodb:
-    host: 104.199.166.106
+    host: ${MONGODB_HOST:104.155.229.164}
     port: 27017
     username: "root"
     password: "123456"
     authentication-database: "admin"
   data:
     redis:
-      host: 104.199.166.106
+      host: ${REDIS_HOST:104.155.229.164}
       port: 6379
       database: 0
       timeout: 3s
@@ -39,7 +39,7 @@ spring:
       ssl:
         enabled: false
   elasticsearch:
-    uris: "http://104.199.166.106:9200"
+    uris: "http://${ELASTICSEARCH_HOST:104.155.229.164}:9200"
     username: elastic
     password: 123456
     connection-timeout: 3s
@@ -58,7 +58,7 @@ spring:
             logger-level: basic
 rocketmq:
   producer:
-    endpoints: "104.199.166.106:18081"
+    endpoints: "${ROCKETMQ_HOST:104.155.229.164}:18081"
     ssl-enabled: false
 
 management:

@@ -13,12 +13,12 @@ spring:
         big-decimal: decimal128
   datasource:
     business:
-      url: "jdbc:postgresql://104.199.166.106:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai"
+      url: "jdbc:postgresql://${PLAYGROUND_BUSINESS_DB_HOST:104.155.229.164}:5432/postgres?options=-c%20TimeZone%3DAsia%2FShanghai"
       username: root
       password: 123456
       driver-class-name: org.postgresql.Driver
     playground:
-      url: "jdbc:postgresql://104.199.166.106:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai"
+      url: "jdbc:postgresql://${PLAYGROUND_DB_HOST:104.155.229.164}:5432/demo?options=-c%20TimeZone%3DAsia%2FShanghai"
       username: root
       password: 123456
       driver-class-name: org.postgresql.Driver
@@ -29,6 +29,25 @@ spring:
     default-schema: flyway_migration
     create-schemas: true
     table: flyway_schema_history
+  cloud:
+    sentinel:
+      enabled: true
+      eager: true
+      transport:
+        dashboard: ${SENTINEL_DASHBOARD:104.155.229.164:8858}
+        port: ${SENTINEL_TRANSPORT_PORT:8720}
+        client-ip: ${SENTINEL_CLIENT_IP:104.155.229.164}
+      datasource:
+        flow-rules:
+          nacos:
+            server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+            username: ${NACOS_USERNAME:nacos}
+            password: ${NACOS_PASSWORD:123456}
+            namespace: ${NACOS_NAMESPACE:}
+            data-id: playground-service-sentinel-flow-rules.json
+            group-id: SPRING_FEATURE_COLLECTION
+            data-type: json
+            rule-type: flow
 application:
   mybatis:
     mapper-locations:
@@ -111,14 +130,14 @@ shared:
 xxl:
   job:
     admin:
-      addresses: "http://104.199.166.106:18083"
+      addresses: "http://${XXL_JOB_ADMIN_HOST:104.155.229.164}:18083"
       access-token: xxl-job-token
       timeout: 3
     executor:
       appname: spring-feature-collection-executor
-      address: ""
-      ip: ""
-      port: 19999
+      address: ${XXL_JOB_EXECUTOR_ADDRESS:http://104.155.229.164:19998}
+      ip: ${XXL_JOB_EXECUTOR_IP:104.155.229.164}
+      port: ${XXL_JOB_EXECUTOR_PORT:19999}
       log-path: /tmp/xxl-job/jobhandler
       log-retention-days: 7
       excluded-package: org.springframework,spring

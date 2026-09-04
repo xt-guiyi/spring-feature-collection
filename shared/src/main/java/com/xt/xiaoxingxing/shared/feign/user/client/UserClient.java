@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
         fallbackFactory = UserClientFallbackFactory.class)
 public interface UserClient {
 
-    /** 通过 user-service 的内部接口查询用户。 */
-    @GetMapping("/internal/users/{id}")
+    /** 通过 user-service 查询用户。 */
+    @GetMapping("/api/users/{id}")
     Result<UserRemoteResponse> getById(@PathVariable("id") Long id);
 }
