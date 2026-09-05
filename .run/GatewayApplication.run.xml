@@ -3,9 +3,12 @@
     <envs>
       <env name="NACOS_NAMESPACE" value="xt" />
       <env name="NACOS_SERVER_ADDR" value="104.155.229.164:8848" />
+      <env name="SW_AGENT_COLLECTOR_BACKEND_SERVICES" value="127.0.0.1:11800" />
+      <env name="SW_AGENT_NAME" value="gateway-service" />
       <env name="spring.profiles.active" value="dev" />
     </envs>
     <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
+    <option name="VM_PARAMETERS" value="-javaagent:$PROJECT_DIR$/docker/skywalking/agent/skywalking-agent.jar" />
     <module name="gateway" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="com.xt.xiaoxingxing.gateway.GatewayApplication" />
     <extension name="coverage">

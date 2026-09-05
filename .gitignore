@@ -47,3 +47,6 @@ buildNumber.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# SkyWalking Java Agent 由下载脚本安装，不提交二进制和插件。
+docker/skywalking/agent/

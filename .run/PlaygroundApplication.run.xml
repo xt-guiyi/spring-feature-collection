@@ -12,6 +12,8 @@
       <env name="SENTINEL_DASHBOARD" value="104.155.229.164:8858" />
       <env name="SENTINEL_CLIENT_IP" value="104.155.229.164" />
       <env name="SENTINEL_TRANSPORT_PORT" value="8720" />
+      <env name="SW_AGENT_COLLECTOR_BACKEND_SERVICES" value="127.0.0.1:11800" />
+      <env name="SW_AGENT_NAME" value="playground-service" />
       <env name="spring.profiles.active" value="dev" />
       <env name="XXL_JOB_EXECUTOR_IP" value="104.155.229.164" />
       <env name="XXL_JOB_EXECUTOR_ADDRESS" value="http://104.155.229.164:19998" />
@@ -19,6 +21,7 @@
       <env name="XXL_JOB_ADMIN_HOST" value="104.155.229.164" />
     </envs>
     <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
+    <option name="VM_PARAMETERS" value="-javaagent:$PROJECT_DIR$/docker/skywalking/agent/skywalking-agent.jar" />
     <module name="playground" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="com.xt.xiaoxingxing.playground.PlaygroundApplication" />
     <extension name="coverage">

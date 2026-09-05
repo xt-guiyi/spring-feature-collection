@@ -10,11 +10,14 @@
       <env name="REDIS_HOST" value="104.155.229.164" />
       <env name="ROCKETMQ_HOST" value="104.155.229.164" />
       <env name="SENTINEL_DASHBOARD" value="127.0.0.1:8858" />
+      <env name="SW_AGENT_COLLECTOR_BACKEND_SERVICES" value="127.0.0.1:11800" />
+      <env name="SW_AGENT_NAME" value="user-service" />
       <env name="spring.profiles.active" value="dev" />
       <env name="USER_DB_HOST" value="104.155.229.164" />
       <env name="XXL_JOB_ADMIN_HOST" value="104.155.229.164" />
     </envs>
     <option name="FRAME_DEACTIVATION_UPDATE_POLICY" value="UnknownPolicyInFreeMode" />
+    <option name="VM_PARAMETERS" value="-javaagent:$PROJECT_DIR$/docker/skywalking/agent/skywalking-agent.jar" />
     <module name="user" />
     <option name="SPRING_BOOT_MAIN_CLASS" value="com.xt.xiaoxingxing.user.UserApplication" />
     <extension name="coverage">

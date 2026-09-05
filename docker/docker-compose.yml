@@ -131,6 +131,69 @@ services:
     networks:
       - elasticsearch-network
 
+  # skywalking-banyandb：SkyWalking 独立存储，不使用项目现有 Elasticsearch。
+  skywalking-banyandb:
+    image: apache/skywalking-banyandb:0.11.0
+    container_name: skywalking-banyandb
+    restart: unless-stopped
+    command:
+      - standalone
+      - --stream-root-path
+      - /data/stream
+      - --measure-root-path
+      - /data/measure
+    volumes:
+      - skywalking_banyandb_data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -nz 127.0.0.1 17912"]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 10s
+    networks:
+      - skywalking-network
+
+  # skywalking-oap：接收 Java Agent 上报的数据，分析后写入 BanyanDB。
+  skywalking-oap:
+    image: apache/skywalking-oap-server:11.0.0
+    container_name: skywalking-oap
+    restart: unless-stopped
+    environment:
+      SW_STORAGE: banyandb
+      SW_STORAGE_BANYANDB_TARGETS: skywalking-banyandb:17912
+      SW_HEALTH_CHECKER: default
+      JAVA_OPTS: -Xms512m -Xmx1024m
+    ports:
+      # 只绑定服务器回环地址，本机 Agent 通过 SSH 隧道接入。
+      - "127.0.0.1:11800:11800"
+    depends_on:
+      skywalking-banyandb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/127.0.0.1/12800"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+    networks:
+      - skywalking-network
+
+  # skywalking-ui：Horizon UI，通过 OAP 查询链路、拓扑和指标。
+  skywalking-ui:
+    image: apache/skywalking-ui:horizon-1.0.0
+    container_name: skywalking-ui
+    restart: unless-stopped
+    ports:
+      # UI 不暴露公网，通过 SSH 隧道访问。
+      - "127.0.0.1:18084:8081"
+    volumes:
+      - ./skywalking/horizon.yaml:/app/horizon.yaml:ro
+    depends_on:
+      skywalking-oap:
+        condition: service_healthy
+    networks:
+      - skywalking-network
+
   # mysql：XXL-JOB Admin 使用的 MySQL 数据库。
   mysql:
     image: mysql:8.4
@@ -332,6 +395,7 @@ volumes:
   rocketmq_broker_store:
   rocketmq_broker_logs:
   rocketmq_proxy_logs:
+  skywalking_banyandb_data:
 
 # networks：声明服务之间通信使用的 Docker 网络。
 networks:
@@ -351,3 +415,7 @@ networks:
   # Sentinel Dashboard 独立网络；客户端通过服务器公网 8858 端口接入。
   sentinel-network:
     name: sentinel-network
+
+  # SkyWalking 三个组件使用独立网络，不接入项目 Elasticsearch 网络。
+  skywalking-network:
+    name: skywalking-network

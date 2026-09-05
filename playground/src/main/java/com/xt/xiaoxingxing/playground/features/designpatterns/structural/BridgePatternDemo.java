@@ -49,7 +49,7 @@ public final class BridgePatternDemo {
 
         protected abstract List<Metric> metrics();
 
-        private String render() {
+        public final String render() {
             return renderer.render(title(), metrics());
         }
     }

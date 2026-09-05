@@ -23,9 +23,9 @@ RocketMQ、Drools、XXL-JOB、Flyway 和 PostgreSQL 学习代码。
 - Java 21
 - Nacos：注册中心和配置中心，客户端端口 8848，控制台端口 18848
 - Gateway WebFlux、OpenFeign、LoadBalancer、Sentinel
+- SkyWalking OAP 11.0.0、BanyanDB 0.11.0、Horizon UI 1.0.0、Java Agent 9.6.0
 
-当前只完成服务发现、配置、网关路由和用户服务调用；暂不引入 Security、Seata、Dubbo、链路追踪、
-注册中心集群或 Kubernetes。
+当前已接入 SkyWalking 链路追踪；暂不引入 Security、Seata、Dubbo、注册中心集群或 Kubernetes。
 
 ## Playground 目录结构
 
@@ -92,6 +92,28 @@ bash docker/nacos/config/publish-config.sh
 3. 发布 Nacos 配置，并为服务设置 `USER_DB_PASSWORD`、`PLAYGROUND_DB_PASSWORD`、Redis、Mongo、
    Elasticsearch、RocketMQ 等环境变量。
 4. 分别启动 `UserApplication`、`PlaygroundApplication` 和 `GatewayApplication`。
+
+## SkyWalking 链路追踪
+
+服务器通过 Docker 运行 BanyanDB、OAP 和 Horizon UI，不使用项目现有 Elasticsearch。首次在本机
+安装 Java Agent：
+
+```bash
+bash docker/skywalking/download-agent.sh
+```
+
+服务器端组件：
+
+```bash
+docker compose -f docker/docker-compose.yml up -d skywalking-banyandb skywalking-oap skywalking-ui
+```
+
+运行 `bash docker/SSH反向隧道.sh` 建立隧道后，再启动三个 IDEA 服务。共享启动配置已经分别设置
+`gateway-service`、`playground-service`、`user-service`，并通过本机 `127.0.0.1:11800` 向 OAP
+上报。UI 地址为 <http://127.0.0.1:18084>，学习账号为 `admin / admin`。
+
+通过网关请求 Playground 的 Feign 示例后，可以在 UI 查看
+`gateway-service -> playground-service -> user-service` 的完整 Trace。
 
 通过网关访问：
 
